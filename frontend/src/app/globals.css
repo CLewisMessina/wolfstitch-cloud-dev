@@ -1,0 +1,232 @@
+@import 'tailwindcss';
+
+/* Dark theme colors and gradients */
+:root {
+  --coral: 255, 107, 107;
+  --coral-dark: 232, 85, 85;
+  --coral-light: 255, 138, 138;
+  --teal: 78, 205, 196;
+  --dark: 26, 26, 46;
+  --dark-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f1419 100%);
+}
+
+/* Base styles */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Background classes */
+.bg-dark {
+  background: var(--dark-gradient);
+  min-height: 100vh;
+}
+
+.bg-dark-card {
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(8px);
+}
+
+.bg-card {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Coral color system */
+.text-coral {
+  color: rgb(var(--coral));
+}
+
+.bg-coral {
+  background-color: rgb(var(--coral));
+}
+
+.bg-coral\/10 {
+  background-color: rgba(var(--coral), 0.1);
+}
+
+.bg-coral\/15 {
+  background-color: rgba(var(--coral), 0.15);
+}
+
+.bg-coral\/20 {
+  background-color: rgba(var(--coral), 0.2);
+}
+
+.border-coral {
+  border-color: rgb(var(--coral));
+}
+
+.border-coral\/30 {
+  border-color: rgba(var(--coral), 0.3);
+}
+
+.border-coral\/50 {
+  border-color: rgba(var(--coral), 0.5);
+}
+
+.shadow-coral\/20 {
+  box-shadow: 0 10px 30px rgba(var(--coral), 0.2);
+}
+
+.shadow-coral\/30 {
+  box-shadow: 0 10px 30px rgba(var(--coral), 0.3);
+}
+
+.text-coral-light {
+  color: rgb(var(--coral-light));
+}
+
+.bg-coral-dark {
+  background-color: rgb(var(--coral-dark));
+}
+
+/* Teal color system */
+.text-teal {
+  color: rgb(var(--teal));
+}
+
+.bg-teal {
+  background-color: rgb(var(--teal));
+}
+
+.bg-teal\/10 {
+  background-color: rgba(var(--teal), 0.1);
+}
+
+.bg-teal\/20 {
+  background-color: rgba(var(--teal), 0.2);
+}
+
+.bg-teal\/30 {
+  background-color: rgba(var(--teal), 0.3);
+}
+
+.border-teal {
+  border-color: rgb(var(--teal));
+}
+
+.border-teal\/30 {
+  border-color: rgba(var(--teal), 0.3);
+}
+
+.border-teal\/50 {
+  border-color: rgba(var(--teal), 0.5);
+}
+
+/* Gradient text effect */
+.text-gradient {
+  background: linear-gradient(135deg, rgb(var(--coral)) 0%, rgb(var(--teal)) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Custom animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(var(--coral), 0.5);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(var(--coral), 0.8);
+  }
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--coral));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--coral-dark));
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--coral)) #1a1a2e;
+}
+
+/* Button hover effects */
+.button-glow:hover {
+  animation: pulse-glow 2s infinite;
+}
+
+/* Glass effect enhancements */
+.glass-morphism {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+}
+
+/* Status indicator animations */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* File type icon glow effects */
+.file-icon-glow {
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+/* Progress ring styles */
+.progress-ring {
+  transition: stroke-dashoffset 0.5s ease-out;
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive utilities */
+@media (max-width: 768px) {
+  .text-4xl {
+    font-size: 2rem;
+  }
+  
+  .p-12 {
+    padding: 2rem;
+  }
+  
+  .grid-cols-3 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}

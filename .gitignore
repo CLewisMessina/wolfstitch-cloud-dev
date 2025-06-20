@@ -1,0 +1,149 @@
+# Wolfstitch Cloud - Git Ignore Patterns
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.staging
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+
+# Database
+*.db
+*.sqlite3
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# Redis dump
+dump.rdb
+
+# File uploads and temporary files
+uploads/
+temp/
+tmp/
+*.tmp
+
+# Documentation builds
+docs/_build/
+site/
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn/
+.pnpm-debug.log*
+
+# Next.js
+.next/
+out/
+
+# Vercel
+.vercel
+
+# Production builds
+build/
+dist/
+
+# Secrets and certificates
+*.pem
+*.key
+*.crt
+secrets/
+
+# Docker
+.dockerignore
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Backup files
+*.bak
+*.backup
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Monitoring and profiling
+.prof
+.heapprofile
+
+# Local development data
+dev-data/
+test-files/
+sample-files/
+
+# Legacy desktop app files (if copying from desktop repo)
+*.wsession
+.wolfscribe_*
+assets/icons/
+ui/
+
+# Cloud-specific ignores
+kubernetes-secrets/
+infrastructure/secrets/

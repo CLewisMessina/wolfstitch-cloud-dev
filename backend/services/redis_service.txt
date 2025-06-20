@@ -1,0 +1,94 @@
+"""
+Wolfstitch Cloud - Redis Service
+Week 1 implementation with Redis connection management
+"""
+
+import redis.asyncio as redis
+import json
+import logging
+from typing import Any, Optional
+from backend.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class RedisService:
+    """Redis service for caching and job queues"""
+    
+    def __init__(self):
+        self.redis_client: Optional[redis.Redis] = None
+    
+    async def connect(self):
+        """Connect to Redis"""
+        try:
+            self.redis_client = redis.from_url(
+                settings.REDIS_URL,
+                encoding="utf-8",
+                decode_responses=True
+            )
+            # Test connection
+            await self.redis_client.ping()
+            logger.info("✅ Redis connection established")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Redis connection failed: {e}")
+            # For Week 1, continue without Redis (use in-memory storage)
+            self.redis_client = None
+    
+    async def disconnect(self):
+        """Disconnect from Redis"""
+        if self.redis_client:
+            await self.redis_client.close()
+            logger.info("Redis connection closed")
+    
+    async def set(self, key: str, value: Any, expire: Optional[int] = None):
+        """Set a value in Redis"""
+        if not self.redis_client:
+            return  # Skip if Redis not available
+        
+        try:
+            serialized_value = json.dumps(value) if not isinstance(value, str) else value
+            await self.redis_client.set(key, serialized_value, ex=expire)
+        except Exception as e:
+            logger.error(f"Redis set failed: {e}")
+    
+    async def get(self, key: str) -> Optional[Any]:
+        """Get a value from Redis"""
+        if not self.redis_client:
+            return None
+        
+        try:
+            value = await self.redis_client.get(key)
+            if value:
+                try:
+                    return json.loads(value)
+                except json.JSONDecodeError:
+                    return value
+            return None
+        except Exception as e:
+            logger.error(f"Redis get failed: {e}")
+            return None
+    
+    async def delete(self, key: str):
+        """Delete a key from Redis"""
+        if not self.redis_client:
+            return
+        
+        try:
+            await self.redis_client.delete(key)
+        except Exception as e:
+            logger.error(f"Redis delete failed: {e}")
+    
+    async def ping(self):
+        """Ping Redis to check connection"""
+        if not self.redis_client:
+            raise Exception("Redis not connected")
+        
+        return await self.redis_client.ping()
+
+
+# Global Redis client instance
+redis_service = RedisService()
+
+# For backward compatibility
+redis_client = redis_service
