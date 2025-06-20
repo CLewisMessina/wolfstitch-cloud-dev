@@ -3,7 +3,7 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
-# Wolfcore dependencies
+# Core document processing dependencies
 pypdf==3.17.1
 python-docx==1.1.0
 pdfminer.six==20231228
@@ -12,20 +12,29 @@ openpyxl==3.1.2
 lxml==4.9.3
 chardet==5.2.0
 
-# API dependencies
+# API framework dependencies
 pydantic==2.5.0
 pydantic-settings==2.1.0
 httpx==0.25.2
 
-# Database (for Railway)
+# Database support (Railway managed)
 psycopg2-binary==2.9.7
 redis==4.6.0
+
+# Security and authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
 
 # Development and testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
 
-# Security and utilities
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-dotenv==1.0.0
+# Additional dependencies for better Railway compatibility
+wheel==0.42.0
+setuptools==69.0.3
+
+# Optional: Add these if wolfcore requires them
+# tiktoken==0.5.2
+# transformers==4.36.2
+# torch==2.1.2

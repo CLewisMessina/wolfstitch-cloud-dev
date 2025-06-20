@@ -1,0 +1,19 @@
+[build]
+providers = ["python"]
+
+[variables]
+PYTHONPATH = "/app"
+PYTHONDONTWRITEBYTECODE = "1"
+PYTHONUNBUFFERED = "1"
+
+[phases.build]
+cmds = [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+]
+
+[phases.install]
+aptPkgs = ["gcc", "g++", "libxml2-dev", "libxslt-dev", "libffi-dev", "libssl-dev"]
+
+[start]
+cmd = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
