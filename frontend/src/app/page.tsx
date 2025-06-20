@@ -9,16 +9,11 @@ import {
   FileText, 
   Download, 
   CheckCircle, 
-  Clock, 
-  BarChart3,
-  Settings,
   Eye,
   ChevronDown,
-  Play,
   Zap,
   Activity,
-  AlertCircle,
-  X
+  AlertCircle
 } from 'lucide-react';
 
 // Types for API responses
@@ -39,7 +34,6 @@ const WolfstitchApp = () => {
   const [showFileDetails, setShowFileDetails] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   // Refs
@@ -54,7 +48,6 @@ const WolfstitchApp = () => {
   const processFiles = async (files: File[]) => {
     if (files.length === 0) return;
 
-    setIsUploading(true);
     setError(null);
     setProcessingStep('processing');
     setProgress(0);
@@ -116,8 +109,6 @@ const WolfstitchApp = () => {
       console.error('Processing error:', error);
       setError(error instanceof Error ? error.message : 'Unknown error occurred');
       setProcessingStep('error');
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -330,7 +321,7 @@ const WolfstitchApp = () => {
                 </div>
                 <div className="space-y-4">
                   <button className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105">
-                    <Upload className="w-5 h-5 mr-3" />
+                    <Upload className="w-5 h-5 mr-2" />
                     Choose Files
                   </button>
                   <p className="text-sm text-gray-400">
@@ -344,67 +335,16 @@ const WolfstitchApp = () => {
 
         {/* Processing Section */}
         {processingStep === 'processing' && (
-          <section className="space-y-6">
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-10">
-              <div className="text-center space-y-8">
-                <div className="space-y-2">
-                  <h3 className="text-3xl font-bold text-white">Processing Your Files</h3>
-                  <p className="text-gray-400">Applying intelligent algorithms to transform your documents</p>
-                  {selectedFiles.length > 0 && (
-                    <p className="text-[#4ECDC4] font-medium">
-                      Processing: {selectedFiles[0].name}
-                    </p>
-                  )}
-                </div>
-                
-                <CircularProgress percentage={progress} />
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className={`p-4 rounded-xl border transition-all duration-300 ${
-                    progress > 20 
-                      ? 'bg-[rgba(255,107,71,0.2)] border-[rgba(255,107,71,0.5)] text-[#FF6B47]' 
-                      : 'bg-gray-800 border-gray-600 text-gray-500'
-                  }`}>
-                    <div className="flex items-center justify-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${progress > 20 ? 'bg-[#FF6B47] animate-pulse' : 'bg-gray-600'}`}></div>
-                      <span className="font-medium">Parsing Documents</span>
-                    </div>
-                    <p className="text-xs mt-2 opacity-75">Extracting text and structure</p>
-                  </div>
-                  
-                  <div className={`p-4 rounded-xl border transition-all duration-300 ${
-                    progress > 50 
-                      ? 'bg-[rgba(78,205,196,0.2)] border-[rgba(78,205,196,0.5)] text-[#4ECDC4]' 
-                      : 'bg-gray-800 border-gray-600 text-gray-500'
-                  }`}>
-                    <div className="flex items-center justify-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${progress > 50 ? 'bg-[#4ECDC4] animate-pulse' : 'bg-gray-600'}`}></div>
-                      <span className="font-medium">Smart Cleaning</span>
-                    </div>
-                    <p className="text-xs mt-2 opacity-75">Context-aware normalization</p>
-                  </div>
-                  
-                  <div className={`p-4 rounded-xl border transition-all duration-300 ${
-                    progress > 80 
-                      ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
-                      : 'bg-gray-800 border-gray-600 text-gray-500'
-                  }`}>
-                    <div className="flex items-center justify-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${progress > 80 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
-                      <span className="font-medium">Intelligent Chunking</span>
-                    </div>
-                    <p className="text-xs mt-2 opacity-75">Token-aware splitting</p>
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <p className="text-gray-300">
-                    {progress < 30 && "Analyzing document structure and extracting content..."}
-                    {progress >= 30 && progress < 60 && "Applying smart cleaning algorithms and normalizing text..."}
-                    {progress >= 60 && progress < 90 && "Creating intelligent chunks with semantic boundaries..."}
-                    {progress >= 90 && "Finalizing your AI-ready dataset..."}
-                  </p>
-                </div>
+          <section className="text-center space-y-8">
+            <div className="flex flex-col items-center space-y-8">
+              <CircularProgress percentage={progress} />
+              <div className="space-y-2">
+                <h3 className="text-2xl font-bold text-white">
+                  Processing Your Document
+                </h3>
+                <p className="text-gray-300">
+                  Parsing content, cleaning text, and creating intelligent chunks...
+                </p>
               </div>
             </div>
           </section>
@@ -412,74 +352,64 @@ const WolfstitchApp = () => {
 
         {/* Error Section */}
         {processingStep === 'error' && (
-          <section className="space-y-6">
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-red-500/50 p-8">
-              <div className="text-center space-y-6">
-                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto">
-                  <AlertCircle className="w-8 h-8 text-red-400" />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Processing Error</h3>
-                  <p className="text-gray-400 mb-4">
-                    There was an issue processing your file. Please try again.
-                  </p>
-                  {error && (
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-red-300 text-sm">
-                      <strong>Error details:</strong> {error}
-                    </div>
-                  )}
-                  <div className="mt-4 text-xs text-gray-500">
-                    API Endpoint: {API_BASE_URL}
-                  </div>
-                </div>
-                <button
-                  onClick={resetApp}
-                  className="inline-flex items-center px-6 py-3 bg-[#FF6B47] hover:bg-[#E85555] text-white rounded-xl font-semibold transition-colors"
-                >
-                  <Upload className="w-5 h-5 mr-2" />
-                  Try Again
-                </button>
+          <section className="text-center space-y-6">
+            <div className="flex flex-col items-center space-y-6">
+              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-10 h-10 text-red-400" />
               </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-bold text-white">
+                  Processing Failed
+                </h3>
+                <p className="text-gray-300 max-w-md mx-auto">
+                  {error || 'Something went wrong while processing your file. Please try again.'}
+                </p>
+              </div>
+              <button
+                onClick={resetApp}
+                className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105"
+              >
+                Try Again
+              </button>
             </div>
           </section>
         )}
 
-        {/* Results Section */}
+        {/* Success Section */}
         {processingStep === 'completed' && processingResult && (
           <section className="space-y-6">
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-8">
-              <div className="flex items-center mb-8">
-                <div className="w-12 h-12 bg-gradient-to-br from-[#4ECDC4] to-green-400 rounded-full flex items-center justify-center mr-4">
-                  <CheckCircle className="w-7 h-7 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-3xl font-bold text-white">Processing Complete!</h3>
-                  <p className="text-gray-400">Your AI-ready dataset is ready</p>
-                  <p className="text-[#4ECDC4] text-sm mt-1">
-                    File: {processingResult.filename}
-                  </p>
-                </div>
+            <div className="text-center space-y-4">
+              <div className="w-20 h-20 bg-[#4ECDC4]/20 rounded-full flex items-center justify-center mx-auto">
+                <CheckCircle className="w-10 h-10 text-[#4ECDC4]" />
               </div>
+              <h3 className="text-2xl font-bold text-white">
+                Processing Complete!
+              </h3>
+              <p className="text-gray-300">
+                Your document has been successfully processed and chunked
+              </p>
+            </div>
 
-              {/* Results Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-                <div className="bg-gradient-to-br from-green-500/20 to-green-600/10 rounded-xl p-6 border border-green-500/30 text-center">
-                  <div className="text-3xl font-bold text-green-400">
-                    {processingResult.chunks || 'N/A'}
+            {/* Results Summary */}
+            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[#FF6B47] mb-1">
+                    {processingResult.chunks || 0}
                   </div>
-                  <div className="text-sm text-gray-300 mt-1">Chunks Created</div>
+                  <div className="text-sm text-gray-300">Chunks Created</div>
                 </div>
-                <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl p-6 border border-blue-500/30 text-center">
-                  <div className="text-3xl font-bold text-blue-400">
-                    {processingResult.total_tokens || 'N/A'}
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[#4ECDC4] mb-1">
+                    {processingResult.total_tokens?.toLocaleString() || '0'}
                   </div>
-                  <div className="text-sm text-gray-300 mt-1">Total Tokens</div>
+                  <div className="text-sm text-gray-300">Total Tokens</div>
                 </div>
-                <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-6 border border-purple-500/30 text-center">
-                  <div className="text-3xl font-bold text-purple-400">
-                    Complete
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-white mb-1">
+                    {Math.round((processingResult.total_tokens || 0) / (processingResult.chunks || 1))}
                   </div>
-                  <div className="text-sm text-gray-300 mt-1">Status</div>
+                  <div className="text-sm text-gray-300">Avg Tokens/Chunk</div>
                 </div>
               </div>
 

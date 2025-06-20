@@ -1,6 +1,6 @@
 """
 Wolfstitch Cloud - FastAPI Application Entry Point
-Railway-compatible main application setup
+Railway-compatible main application setup with CORS fix
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -62,10 +62,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# CORS middleware - UPDATED TO FIX FRONTEND ISSUE
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else ["https://*.railway.app"],
+    allow_origins=[
+        "http://localhost:3000",           # Local frontend
+        "http://127.0.0.1:3000",          # Alternative local
+        "https://www.wolfstitch.dev",     # Production frontend (future)
+        "https://wolfstitch.dev",         # Root domain
+        "*"                               # Temporary - allow all for testing
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,6 +108,8 @@ async def quick_process(
 ):
     """Process uploaded file quickly"""
     try:
+        logger.info(f"Processing file: {file.filename} from frontend")
+        
         if not WOLFCORE_AVAILABLE:
             return {
                 "message": "Basic processing (wolfcore loading...)",
@@ -123,6 +131,8 @@ async def quick_process(
                 tokenizer=tokenizer,
                 max_tokens=max_tokens
             )
+            
+            logger.info(f"Processing completed: {len(result.chunks)} chunks, {result.total_tokens} tokens")
             
             return {
                 "message": "File processed successfully",
