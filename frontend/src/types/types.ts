@@ -1,5 +1,5 @@
 // frontend/src/types/types.ts
-// Enhanced type definitions for robust API response handling - Fixed TypeScript Issues
+// Enhanced type definitions for robust API response handling
 
 // =============================================================================
 // API RESPONSE TYPES
@@ -12,7 +12,7 @@ export interface EnhancedChunk {
   text: string;
   token_count: number;
   chunk_index: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 /**
@@ -40,8 +40,8 @@ export interface EnhancedApiResponse {
   status: string;
   enhanced: boolean;
   chunks: EnhancedChunk[];
-  file_info?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  file_info?: Record<string, any>;
+  metadata?: Record<string, any>;
   filename?: string;
 }
 
@@ -61,7 +61,7 @@ export interface NormalizedChunk {
   id: number;
   text: string;
   tokens: number;
-  metadata: Record<string, unknown>;
+  metadata: Record<string, any>;
 }
 
 /**
@@ -88,8 +88,8 @@ export interface ProcessingResult {
   metadata: {
     job_id?: string;
     processed_at: string;
-    file_info?: Record<string, unknown>;
-    api_metadata?: Record<string, unknown>;
+    file_info?: Record<string, any>;
+    api_metadata?: Record<string, any>;
   };
 }
 
@@ -122,7 +122,7 @@ export interface UploadState {
 export interface ProcessingError {
   type: 'network' | 'validation' | 'processing' | 'rendering' | 'unknown';
   message: string;
-  details?: Record<string, unknown>;
+  details?: Record<string, any>;
   recoverable: boolean;
   suggestions: string[];
 }
@@ -130,7 +130,7 @@ export interface ProcessingError {
 export interface ErrorBoundaryState {
   hasError: boolean;
   error?: Error;
-  errorInfo?: Record<string, unknown>;
+  errorInfo?: Record<string, any>;
   errorId: string;
 }
 

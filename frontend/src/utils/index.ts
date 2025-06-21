@@ -1,5 +1,5 @@
 // frontend/src/utils/index.ts
-// Central exports for all utility functions - Fixed TypeScript Issues
+// Central exports for all utility functions
 
 // Type definitions
 export * from '../types/types';
@@ -50,18 +50,16 @@ export const generateDownloadFilename = (originalFilename: string, suffix = '_pr
   return `${baseName}${suffix}.jsonl`;
 };
 
-export const createJsonlContent = (chunks: unknown[], metadata: Record<string, unknown> = {}): string => {
+export const createJsonlContent = (chunks: any[], metadata: any = {}): string => {
   return chunks.map((chunk, index) => 
     JSON.stringify({
-      text: typeof chunk === 'string' ? chunk : (chunk as Record<string, unknown>).text,
+      text: typeof chunk === 'string' ? chunk : chunk.text,
       chunk_id: index + 1,
-      tokens: typeof chunk === 'object' && chunk !== null && 'tokens' in chunk 
-        ? (chunk as Record<string, unknown>).tokens 
-        : Math.ceil(((chunk as Record<string, unknown>).text as string || String(chunk)).length / 4),
+      tokens: typeof chunk === 'object' && chunk.tokens ? chunk.tokens : Math.ceil((chunk.text || chunk).length / 4),
       metadata: {
         processed_at: new Date().toISOString(),
         ...metadata,
-        ...(typeof chunk === 'object' && chunk !== null ? (chunk as Record<string, unknown>).metadata as Record<string, unknown> || {} : {})
+        ...(typeof chunk === 'object' ? chunk.metadata : {})
       }
     })
   ).join('\n');
@@ -78,7 +76,7 @@ export const getApiConfig = () => ({
 });
 
 // Error logging utility
-export const logError = (error: unknown, context?: string) => {
+export const logError = (error: any, context?: string) => {
   if (isDevelopment()) {
     console.error(`[${context || 'Unknown'}]`, error);
   }

@@ -1,5 +1,5 @@
 // frontend/src/utils/apiClient.ts
-// Enhanced API client with robust error handling and mobile compatibility - Fixed TypeScript Issues
+// Enhanced API client with robust error handling and mobile compatibility
 
 import { ProcessingResult, ProcessingError, DeviceInfo } from '@/types/types';
 import { normalizeApiResponse, createProcessingError } from './apiDataNormalizer';
@@ -36,7 +36,7 @@ const getApiConfig = (): ApiConfig => {
  */
 async function parseApiError(response: Response): Promise<ProcessingError> {
   let errorMessage = `API Error: ${response.status}`;
-  const details: Record<string, unknown> = {
+  let details: Record<string, any> = {
     status: response.status,
     statusText: response.statusText,
     url: response.url
@@ -46,8 +46,8 @@ async function parseApiError(response: Response): Promise<ProcessingError> {
     const contentType = response.headers.get('content-type');
     
     if (contentType?.includes('application/json')) {
-      const errorData = await response.json() as Record<string, unknown>;
-      errorMessage = String(errorData.detail || errorData.message) || errorMessage;
+      const errorData = await response.json();
+      errorMessage = errorData.detail || errorData.message || errorMessage;
       details.apiError = errorData;
     } else {
       const errorText = await response.text();
@@ -62,14 +62,17 @@ async function parseApiError(response: Response): Promise<ProcessingError> {
   }
   
   // Determine error type based on status code
-  const type: ProcessingError['type'] = 
-    response.status >= 400 && response.status < 500
-      ? response.status === 413 ? 'validation' : 'validation'
-      : response.status >= 500
-        ? 'processing'
-        : 'network';
+  let errorType: ProcessingError['type'] = 'unknown';
   
-  return createProcessingError(type, errorMessage, details);
+  if (response.status >= 400 && response.status < 500) {
+    errorType = response.status === 413 ? 'validation' : 'validation';
+  } else if (response.status >= 500) {
+    errorType = 'processing';
+  } else {
+    errorType = 'network';
+  }
+  
+  return createProcessingError(errorType, errorMessage, details);
 }
 
 /**
@@ -79,7 +82,7 @@ function handleNetworkError(error: Error): ProcessingError {
   console.error('Network error:', error);
   
   let message = 'Network error occurred';
-  const type: ProcessingError['type'] = 'network';
+  let type: ProcessingError['type'] = 'network';
   
   if (error.name === 'AbortError') {
     message = 'Request timed out. Please try again.';
@@ -114,9 +117,9 @@ async function withRetry<T>(
   operation: () => Promise<T>,
   maxAttempts: number,
   baseDelay: number,
-  shouldRetry: (error: unknown) => boolean = () => true
+  shouldRetry: (error: any) => boolean = () => true
 ): Promise<T> {
-  let lastError: unknown;
+  let lastError: any;
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -144,23 +147,20 @@ async function withRetry<T>(
 /**
  * Determine if error should be retried
  */
-function shouldRetryError(error: unknown): boolean {
-  const errorObj = error as Record<string, unknown>;
-  
+function shouldRetryError(error: any): boolean {
   // Don't retry client errors (4xx) except for specific cases
-  if (errorObj?.status && typeof errorObj.status === 'number' && errorObj.status >= 400 && errorObj.status < 500) {
+  if (error?.status >= 400 && error?.status < 500) {
     // Retry rate limiting and timeouts
-    return errorObj.status === 429 || errorObj.status === 408;
+    return error.status === 429 || error.status === 408;
   }
   
   // Retry server errors (5xx) and network errors
-  if ((errorObj?.status && typeof errorObj.status === 'number' && errorObj.status >= 500) || 
-      errorObj?.name === 'TypeError' || errorObj?.name === 'NetworkError') {
+  if (error?.status >= 500 || error?.name === 'TypeError' || error?.name === 'NetworkError') {
     return true;
   }
   
   // Retry timeout errors
-  if (errorObj?.name === 'AbortError') {
+  if (error?.name === 'AbortError') {
     return true;
   }
   
@@ -200,7 +200,7 @@ export class ApiClient {
     try {
       // Add device-specific headers
       const headers: Record<string, string> = {
-        ...(options.headers as Record<string, string> || {}),
+        ...options.headers as Record<string, string>,
       };
       
       // Add device information for backend optimization
@@ -297,7 +297,7 @@ export class ApiClient {
           }
           
           // Parse response
-          const responseData = await response.json() as Record<string, unknown>;
+          const responseData = await response.json();
           console.log('Raw API response:', responseData);
           
           // Normalize response data
@@ -361,7 +361,7 @@ export class ApiClient {
         throw new Error(`Health check failed: ${response.status}`);
       }
       
-      return await response.json() as { status: string; timestamp: number };
+      return await response.json();
       
     } catch (error) {
       console.error('Health check failed:', error);

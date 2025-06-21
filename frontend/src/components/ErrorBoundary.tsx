@@ -1,5 +1,5 @@
 // frontend/src/components/ErrorBoundary.tsx
-// React Error Boundary for handling React error #31 and other rendering errors - Fixed TypeScript Issues
+// React Error Boundary for handling React error #31 and other rendering errors
 
 'use client';
 
@@ -10,7 +10,7 @@ import { ErrorBoundaryState } from '@/types/types';
 interface ErrorBoundaryProps {
   children: ReactNode;
   fallbackComponent?: ReactNode;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+  onError?: (error: Error, errorInfo: any) => void;
 }
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -36,7 +36,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: any) {
     // Log error details for debugging
     console.error('ErrorBoundary caught an error:', error);
     console.error('Error info:', errorInfo);
