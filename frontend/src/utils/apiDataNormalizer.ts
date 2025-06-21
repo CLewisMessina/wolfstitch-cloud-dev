@@ -198,29 +198,30 @@ export function normalizeApiResponse(response: unknown): ProcessingResult {
       throw new Error('Response missing required fields');
     }
 
-    // Type guard to ensure we have a proper response object
-    const apiResponse = response as unknown as ApiResponse;
+    const apiResponse = response as Record<string, unknown>;
     let normalizedChunks: NormalizedChunk[] = [];
     let preview: string[] = [];
     let enhanced = false;
     let processingTime: number | undefined;
 
     // Handle enhanced response format
-    if (isEnhancedResponse(apiResponse)) {
+    if (isEnhancedResponse(apiResponse as ApiResponse)) {
       console.log('Processing enhanced API response');
+      const enhancedResp = apiResponse as EnhancedApiResponse;
       enhanced = true;
-      processingTime = apiResponse.processing_time;
+      processingTime = enhancedResp.processing_time;
       
-      const result = normalizeEnhancedChunks(apiResponse.chunks);
+      const result = normalizeEnhancedChunks(enhancedResp.chunks);
       normalizedChunks = result.normalizedChunks;
       preview = result.preview;
     }
     // Handle basic response format
-    else if (isBasicResponse(apiResponse) && apiResponse.preview) {
+    else if (isBasicResponse(apiResponse as ApiResponse) && (apiResponse as BasicApiResponse).preview) {
       console.log('Processing basic API response');
-      processingTime = apiResponse.processing_time;
+      const basicResp = apiResponse as BasicApiResponse;
+      processingTime = basicResp.processing_time;
       
-      const result = normalizeBasicPreview(apiResponse.preview);
+      const result = normalizeBasicPreview(basicResp.preview);
       normalizedChunks = result.normalizedChunks;
       preview = result.preview;
     }
@@ -229,8 +230,7 @@ export function normalizeApiResponse(response: unknown): ProcessingResult {
       console.warn('Unexpected API response format, attempting to extract data');
       
       // Try to find chunk-like data in any property
-      const responseObj = response as Record<string, unknown>;
-      const possibleChunks = responseObj.chunks || responseObj.preview || responseObj.data || [];
+      const possibleChunks = apiResponse.chunks || apiResponse.preview || apiResponse.data || [];
       if (Array.isArray(possibleChunks) && possibleChunks.length > 0) {
         const result = normalizeEnhancedChunks(possibleChunks);
         normalizedChunks = result.normalizedChunks;
@@ -239,11 +239,10 @@ export function normalizeApiResponse(response: unknown): ProcessingResult {
     }
 
     // Extract filename
-    const filename = extractFilename(apiResponse);
+    const filename = extractFilename(apiResponse as ApiResponse);
 
     // Calculate statistics
-    const responseObj = response as Record<string, unknown>;
-    const stats = calculateStats(normalizedChunks, responseObj.total_tokens as number);
+    const stats = calculateStats(normalizedChunks, apiResponse.total_tokens as number);
 
     // Build normalized result
     const normalizedResult: ProcessingResult = {
@@ -260,10 +259,10 @@ export function normalizeApiResponse(response: unknown): ProcessingResult {
       enhanced,
       
       metadata: {
-        job_id: responseObj.job_id as string,
+        job_id: apiResponse.job_id as string,
         processed_at: new Date().toISOString(),
-        file_info: responseObj.file_info as Record<string, unknown>,
-        api_metadata: responseObj.metadata as Record<string, unknown>
+        file_info: apiResponse.file_info as Record<string, unknown>,
+        api_metadata: apiResponse.metadata as Record<string, unknown>
       }
     };
 
@@ -275,7 +274,7 @@ export function normalizeApiResponse(response: unknown): ProcessingResult {
     
     // Return error result with fallback data
     return {
-      filename: extractFilename(response as unknown as ApiResponse) || 'error-file',
+      filename: extractFilename((response as Record<string, unknown>) as ApiResponse) || 'error-file',
       chunks: 0,
       total_tokens: 0,
       average_tokens_per_chunk: 0,
