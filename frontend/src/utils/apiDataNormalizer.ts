@@ -1,5 +1,5 @@
 // frontend/src/utils/apiDataNormalizer.ts
-// Data normalization layer to handle different API response formats
+// Data normalization layer to handle different API response formats - Fixed TypeScript Issues
 
 import { 
   ApiResponse, 
@@ -31,10 +31,12 @@ function isBasicResponse(response: ApiResponse): response is BasicApiResponse {
 /**
  * Validate that response has minimum required fields
  */
-function hasMinimumFields(response: any): boolean {
-  return response && (
-    (response.filename || response.file_info?.filename) ||
-    (response.chunks !== undefined || response.total_chunks !== undefined)
+function hasMinimumFields(response: unknown): response is Record<string, unknown> {
+  if (!response || typeof response !== 'object') return false;
+  const obj = response as Record<string, unknown>;
+  return !!(
+    (obj.filename || (obj.file_info as Record<string, unknown>)?.filename) ||
+    (obj.chunks !== undefined || obj.total_chunks !== undefined)
   );
 }
 
@@ -45,7 +47,7 @@ function hasMinimumFields(response: any): boolean {
 /**
  * Normalize enhanced API response chunks to standard format
  */
-function normalizeEnhancedChunks(chunks: any[]): { normalizedChunks: NormalizedChunk[]; preview: string[] } {
+function normalizeEnhancedChunks(chunks: unknown[]): { normalizedChunks: NormalizedChunk[]; preview: string[] } {
   if (!Array.isArray(chunks)) {
     console.warn('Enhanced chunks is not an array:', chunks);
     return { normalizedChunks: [], preview: [] };
@@ -59,7 +61,7 @@ function normalizeEnhancedChunks(chunks: any[]): { normalizedChunks: NormalizedC
       // Handle different chunk formats
       let text: string;
       let tokens: number;
-      let metadata: Record<string, any> = {};
+      let metadata: Record<string, unknown> = {};
 
       if (typeof chunk === 'string') {
         // Chunk is already a string
@@ -67,12 +69,13 @@ function normalizeEnhancedChunks(chunks: any[]): { normalizedChunks: NormalizedC
         tokens = Math.ceil(chunk.length / 4); // Rough token estimate
       } else if (chunk && typeof chunk === 'object') {
         // Chunk is an object - extract text
-        text = chunk.text || chunk.content || String(chunk);
-        tokens = chunk.token_count || chunk.tokens || Math.ceil(text.length / 4);
+        const chunkObj = chunk as Record<string, unknown>;
+        text = String(chunkObj.text || chunkObj.content || chunk);
+        tokens = Number(chunkObj.token_count || chunkObj.tokens) || Math.ceil(text.length / 4);
         metadata = {
-          chunk_index: chunk.chunk_index ?? index,
-          original_token_count: chunk.token_count,
-          ...chunk.metadata
+          chunk_index: chunkObj.chunk_index ?? index,
+          original_token_count: chunkObj.token_count,
+          ...(chunkObj.metadata as Record<string, unknown> || {})
         };
       } else {
         // Fallback for unexpected formats
@@ -109,7 +112,7 @@ function normalizeEnhancedChunks(chunks: any[]): { normalizedChunks: NormalizedC
 /**
  * Normalize basic API response preview to standard format
  */
-function normalizeBasicPreview(preview: any): { normalizedChunks: NormalizedChunk[]; preview: string[] } {
+function normalizeBasicPreview(preview: unknown): { normalizedChunks: NormalizedChunk[]; preview: string[] } {
   if (!Array.isArray(preview)) {
     console.warn('Basic preview is not an array:', preview);
     return { normalizedChunks: [], preview: [] };
@@ -155,8 +158,8 @@ function extractFilename(response: ApiResponse): string {
   
   if (isEnhancedResponse(response)) {
     return response.filename || 
-           response.file_info?.filename || 
-           response.file_info?.name || 
+           (response.file_info as Record<string, unknown>)?.filename as string || 
+           (response.file_info as Record<string, unknown>)?.name as string || 
            'processed-file';
   }
   
@@ -186,7 +189,7 @@ function calculateStats(chunks: NormalizedChunk[], totalTokens?: number) {
  * Normalize any API response to consistent ProcessingResult format
  * Handles both enhanced and basic API responses with robust error handling
  */
-export function normalizeApiResponse(response: any): ProcessingResult {
+export function normalizeApiResponse(response: unknown): ProcessingResult {
   console.log('Normalizing API response:', response);
 
   try {
@@ -195,27 +198,30 @@ export function normalizeApiResponse(response: any): ProcessingResult {
       throw new Error('Response missing required fields');
     }
 
+    const apiResponse = response as Record<string, unknown>;
     let normalizedChunks: NormalizedChunk[] = [];
     let preview: string[] = [];
     let enhanced = false;
     let processingTime: number | undefined;
 
     // Handle enhanced response format
-    if (isEnhancedResponse(response)) {
+    if (isEnhancedResponse(apiResponse as ApiResponse)) {
       console.log('Processing enhanced API response');
+      const enhancedResp = apiResponse as EnhancedApiResponse;
       enhanced = true;
-      processingTime = response.processing_time;
+      processingTime = enhancedResp.processing_time;
       
-      const result = normalizeEnhancedChunks(response.chunks);
+      const result = normalizeEnhancedChunks(enhancedResp.chunks);
       normalizedChunks = result.normalizedChunks;
       preview = result.preview;
     }
     // Handle basic response format
-    else if (isBasicResponse(response) && response.preview) {
+    else if (isBasicResponse(apiResponse as ApiResponse) && (apiResponse as BasicApiResponse).preview) {
       console.log('Processing basic API response');
-      processingTime = response.processing_time;
+      const basicResp = apiResponse as BasicApiResponse;
+      processingTime = basicResp.processing_time;
       
-      const result = normalizeBasicPreview(response.preview);
+      const result = normalizeBasicPreview(basicResp.preview);
       normalizedChunks = result.normalizedChunks;
       preview = result.preview;
     }
@@ -224,7 +230,7 @@ export function normalizeApiResponse(response: any): ProcessingResult {
       console.warn('Unexpected API response format, attempting to extract data');
       
       // Try to find chunk-like data in any property
-      const possibleChunks = response.chunks || response.preview || response.data || [];
+      const possibleChunks = apiResponse.chunks || apiResponse.preview || apiResponse.data || [];
       if (Array.isArray(possibleChunks) && possibleChunks.length > 0) {
         const result = normalizeEnhancedChunks(possibleChunks);
         normalizedChunks = result.normalizedChunks;
@@ -233,10 +239,10 @@ export function normalizeApiResponse(response: any): ProcessingResult {
     }
 
     // Extract filename
-    const filename = extractFilename(response);
+    const filename = extractFilename(apiResponse as ApiResponse);
 
     // Calculate statistics
-    const stats = calculateStats(normalizedChunks, response.total_tokens);
+    const stats = calculateStats(normalizedChunks, apiResponse.total_tokens as number);
 
     // Build normalized result
     const normalizedResult: ProcessingResult = {
@@ -253,10 +259,10 @@ export function normalizeApiResponse(response: any): ProcessingResult {
       enhanced,
       
       metadata: {
-        job_id: response.job_id,
+        job_id: apiResponse.job_id as string,
         processed_at: new Date().toISOString(),
-        file_info: response.file_info,
-        api_metadata: response.metadata
+        file_info: apiResponse.file_info as Record<string, unknown>,
+        api_metadata: apiResponse.metadata as Record<string, unknown>
       }
     };
 
@@ -268,7 +274,7 @@ export function normalizeApiResponse(response: any): ProcessingResult {
     
     // Return error result with fallback data
     return {
-      filename: extractFilename(response) || 'error-file',
+      filename: extractFilename((response as Record<string, unknown>) as ApiResponse) || 'error-file',
       chunks: 0,
       total_tokens: 0,
       average_tokens_per_chunk: 0,
@@ -298,7 +304,7 @@ export function normalizeApiResponse(response: any): ProcessingResult {
 export function createProcessingError(
   type: ProcessingError['type'],
   message: string,
-  details?: Record<string, any>
+  details?: Record<string, unknown>
 ): ProcessingError {
   const suggestions: string[] = [];
   
