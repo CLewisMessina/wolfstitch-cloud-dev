@@ -202,11 +202,11 @@ async def quick_process(
                 temp_file_path = temp_file.name
                 logger.info(f"📁 Temporary file created: {temp_file_path}")
             
-            # Process with Wolfstitch
+            # Process with Wolfstitch - FIXED: Remove asyncio.run() since we're already in async context
             logger.info(f"🧠 Processing with tokenizer: {tokenizer}, max_tokens: {max_tokens}")
             wolfstitch = WOLFSTITCH_CLASS()
             
-            # Process the file
+            # Process the file synchronously (Wolfstitch is likely sync)
             result = wolfstitch.process_file(
                 temp_file_path,
                 tokenizer=tokenizer,
@@ -245,11 +245,20 @@ async def quick_process(
                 
     except Exception as e:
         logger.error(f"❌ Processing failed: {str(e)}")
+        # Enhanced error handling with more specific error types
+        error_message = str(e)
+        if "asyncio.run() cannot be called from a running event loop" in error_message:
+            error_message = "Processing engine configuration error. Please try again."
+        elif "No module named" in error_message:
+            error_message = "Required processing libraries not available."
+        elif "Permission denied" in error_message:
+            error_message = "File access permission error. Please try a different file."
+        
         raise HTTPException(
             status_code=500,
             detail={
                 "message": "File processing failed",
-                "error": str(e),
+                "error": error_message,
                 "filename": file.filename
             }
         )

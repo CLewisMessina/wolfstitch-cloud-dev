@@ -45,10 +45,14 @@ const WolfstitchApp = () => {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Configuration - Now using environment variables
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.wolfstitch.dev';
+  // Configuration - Enhanced with fallback for local development
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 
+    (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+      ? 'http://localhost:8000' 
+      : 'https://api.wolfstitch.dev');
   const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Wolfstitch';
-  const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
+  const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 
+    (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'development' : 'production');
 
   // File processing function
   const processFiles = async (files: File[]) => {
@@ -91,6 +95,9 @@ const WolfstitchApp = () => {
         method: 'POST',
         body: formData,
         mode: 'cors',
+        headers: {
+          // Don't set Content-Type - let browser set it with boundary for FormData
+        },
       });
 
       clearInterval(progressInterval);
@@ -113,7 +120,21 @@ const WolfstitchApp = () => {
 
     } catch (error) {
       console.error('Processing error:', error);
-      setError(error instanceof Error ? error.message : 'Unknown error occurred');
+      
+      // Enhanced error handling for different scenarios
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        if (API_BASE_URL.includes('localhost')) {
+          errorMessage = 'Cannot connect to local backend. Make sure your backend server is running on the correct port.';
+        } else {
+          errorMessage = 'Network connection failed. Please check your internet connection and try again.';
+        }
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
       setProcessingStep('error');
     }
   };
@@ -323,7 +344,7 @@ const WolfstitchApp = () => {
         {processingStep === 'upload' && (
           <section className="space-y-6">
             <div 
-              className="relative border-2 border-dashed border-[#FF6B47] bg-[rgba(255,107,71,0.1)] hover:bg-[rgba(255,107,71,0.15)] rounded-2xl p-12 text-center transition-all duration-300 cursor-pointer shadow-lg shadow-[rgba(255,107,71,0.2)]"
+              className="relative border-2 border-dashed border-[#FF6B47] bg-[rgba(255,107,71,0.15)] hover:bg-[rgba(255,107,71,0.25)] rounded-2xl p-12 text-center transition-all duration-300 cursor-pointer shadow-lg shadow-[rgba(255,107,71,0.2)]"
               onClick={() => fileInputRef.current?.click()}
               onDrop={handleDrop}
               onDragOver={handleDragOver}
@@ -337,7 +358,7 @@ const WolfstitchApp = () => {
                 accept=".pdf,.docx,.txt,.md,.py,.js,.json,.csv,.pptx,.xlsx,.doc,.rtf,.html,.htm,.xml,.epub"
               />
               <div className="space-y-6">
-                <div className="mx-auto w-20 h-20 bg-[#FF6B47] rounded-full flex items-center justify-center shadow-xl">
+                <div className="mx-auto w-20 h-20 bg-gradient-to-br from-[#FF6B47] to-[#E85555] rounded-full flex items-center justify-center shadow-xl">
                   <Upload className="w-10 h-10 text-white" />
                 </div>
                 <div>
