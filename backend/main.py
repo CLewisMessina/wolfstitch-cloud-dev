@@ -103,7 +103,9 @@ def get_cors_origins():
             "http://localhost:3000",
             "http://127.0.0.1:3000",
             "https://www.wolfstitch.dev",
-            "https://wolfstitch.dev"
+            "https://wolfstitch.dev",
+            "https://dev.wolfstitch.dev",
+            "https://api-dev.wolfstitch.dev"
         ]
 
 # Create FastAPI application
