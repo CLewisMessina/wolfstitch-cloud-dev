@@ -16,13 +16,19 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-// Types for API responses
+// Fixed Types for API responses - matching actual API response structure
+interface ChunkPreview {
+  text: string;
+  tokens: number;
+}
+
 interface ProcessingResult {
   message: string;
   filename: string;
   chunks?: number;
   total_tokens?: number;
-  preview?: string[];
+  average_chunk_size?: number;
+  preview?: ChunkPreview[];  // Fixed: Changed from string[] to ChunkPreview[]
   error?: string;
   status?: string;
 }
@@ -75,7 +81,7 @@ const WolfstitchApp = () => {
       console.log('FormData contents:', {
         fileName: file.name,
         fileSize: file.size,
-        fileType: file.type
+        fileType: file.type || 'application/octet-stream'  // Fixed: Provide default if empty
       });
 
       const fullURL = `${API_BASE_URL}/api/v1/quick-process`;
@@ -112,16 +118,18 @@ const WolfstitchApp = () => {
     }
   };
 
-  // Download functionality
+  // Download functionality - Fixed to handle new preview format
   const downloadResults = () => {
     if (!processingResult) return;
 
-    // Create JSONL content
+    // Create JSONL content - handling both old string[] and new ChunkPreview[] formats
     const jsonlContent = processingResult.preview?.map((chunk, index) => 
       JSON.stringify({
-        text: chunk,
+        text: typeof chunk === 'string' ? chunk : chunk.text,  // Fixed: Handle both formats
         chunk_id: index + 1,
-        tokens: Math.floor((processingResult.total_tokens || 131) / (processingResult.chunks || 1)),
+        tokens: typeof chunk === 'string' 
+          ? Math.floor((processingResult.total_tokens || 131) / (processingResult.chunks || 1))
+          : chunk.tokens,  // Fixed: Use actual tokens from chunk
         metadata: {
           filename: processingResult.filename,
           processed_at: new Date().toISOString()
@@ -143,9 +151,18 @@ const WolfstitchApp = () => {
     console.log('Download initiated:', link.download);
   };
 
-  // File selection handlers
+  // File selection handlers - Fixed for mobile
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
+    // Mobile fix: Log file details for debugging
+    files.forEach(file => {
+      console.log('Selected file details:', {
+        name: file.name,
+        size: file.size,
+        type: file.type || 'unknown',
+        lastModified: file.lastModified
+      });
+    });
     setSelectedFiles(files);
     if (files.length > 0) {
       processFiles(files);
@@ -375,7 +392,7 @@ const WolfstitchApp = () => {
           </section>
         )}
 
-        {/* Success Section */}
+        {/* Success Section - Fixed to handle new preview format */}
         {processingStep === 'completed' && processingResult && (
           <section className="space-y-6">
             <div className="text-center space-y-4">
@@ -407,13 +424,13 @@ const WolfstitchApp = () => {
                 </div>
                 <div className="text-center">
                   <div className="text-3xl font-bold text-white mb-1">
-                    {Math.round((processingResult.total_tokens || 0) / (processingResult.chunks || 1))}
+                    {processingResult.average_chunk_size || 0}
                   </div>
                   <div className="text-sm text-gray-300">Avg Tokens/Chunk</div>
                 </div>
               </div>
 
-              {/* Preview */}
+              {/* Preview - Fixed to handle new format */}
               {processingResult.preview && processingResult.preview.length > 0 && (
                 <div className="bg-gray-800/50 rounded-xl p-6 mb-8 border border-gray-600">
                   <h4 className="font-semibold text-white mb-4 flex items-center">
@@ -424,10 +441,13 @@ const WolfstitchApp = () => {
                     {processingResult.preview.slice(0, 3).map((chunk, index) => (
                       <div key={index} className="bg-gray-900 rounded-lg border border-gray-700 p-4">
                         <div className="font-mono text-sm text-gray-300 leading-relaxed">
-                          {chunk}
+                          {typeof chunk === 'string' ? chunk : chunk.text}
                         </div>
-                        <div className="mt-2 text-xs text-gray-500">
-                          Chunk {index + 1}
+                        <div className="mt-2 text-xs text-gray-500 flex justify-between">
+                          <span>Chunk {index + 1}</span>
+                          {typeof chunk !== 'string' && chunk.tokens && (
+                            <span>{chunk.tokens} tokens</span>
+                          )}
                         </div>
                       </div>
                     ))}
