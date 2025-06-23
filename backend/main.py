@@ -12,6 +12,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime
+from pathlib import Path
 
 # Add project root to Python path for Railway
 if '/app' not in sys.path:
