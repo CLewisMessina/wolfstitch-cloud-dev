@@ -85,7 +85,8 @@ cors_origins = [
     "http://localhost:3001", 
     "https://wolfstitch.dev",
     "https://www.wolfstitch.dev",
-    "https://app.wolfstitch.dev"
+    "https://app.wolfstitch.dev",
+    "https://dev.wolfstitch.dev"
 ]
 
 # Add Railway domains if available
