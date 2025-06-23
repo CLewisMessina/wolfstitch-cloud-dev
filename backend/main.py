@@ -179,7 +179,9 @@ async def health_check():
         "cors_origins": cors_origins,
         "trusted_hosts": trusted_hosts,
         "railway_url": os.getenv("RAILWAY_PUBLIC_DOMAIN", "Not set"),
-        "port": os.getenv("PORT", "8000")
+        "port": os.getenv("PORT", "8000"),
+        "service": "wolfstitch-cloud-api",
+        "timestamp": asyncio.get_event_loop().time()
     }
 
 # Root endpoint
@@ -192,74 +194,143 @@ async def root():
         "environment": settings.ENVIRONMENT,
         "docs": "/docs",
         "health": "/health",
-        "api_endpoints": "/api/v1/"
+        "api_endpoints": "/api/v1/",
+        "status": "operational",
+        "wolfcore_status": "available" if WOLFCORE_AVAILABLE else "unavailable"
     }
 
-# Import API routes
+# File processing endpoint
+@app.post("/api/v1/quick-process")
+async def quick_process_file(
+    file: UploadFile = File(...),
+    tokenizer: Optional[str] = "gpt-4",
+    max_tokens: Optional[int] = 1000
+):
+    """
+    Process uploaded file into chunks
+    Supports 40+ file formats when wolfcore is available
+    """
+    if not WOLFCORE_AVAILABLE:
+        logger.error("Wolfcore not available for file processing")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "File processing service unavailable",
+                "error": "Wolfcore dependency not loaded",
+                "suggestion": "Please check server configuration"
+            }
+        )
+    
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file selected")
+    
+    # Validate file size (100MB limit)
+    max_size = 100 * 1024 * 1024  # 100MB
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is 100MB, got {len(content) / 1024 / 1024:.1f}MB"
+        )
+    
+    # Reset file pointer
+    await file.seek(0)
+    
+    logger.info(f"Processing file: {file.filename} ({len(content)} bytes)")
+    
+    # Create temporary file
+    with tempfile.NamedTemporaryFile(
+        delete=False, 
+        suffix=f".{file.filename.split('.')[-1]}"
+    ) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+    
+    try:
+        # Process with wolfcore
+        wf = WOLFSTITCH_CLASS()
+        
+        # Use async processing to avoid event loop conflicts
+        if hasattr(wf, 'process_file_async'):
+            logger.info("Using async processing method")
+            result = await wf.process_file_async(
+                tmp_path,
+                tokenizer=tokenizer,
+                max_tokens=max_tokens
+            )
+        else:
+            # Fallback to sync processing (should not happen in current wolfcore)
+            logger.warning("Falling back to sync processing method")
+            # Run sync method in thread pool to avoid blocking
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, 
+                lambda: wf.process_file(
+                    tmp_path,
+                    tokenizer=tokenizer,
+                    max_tokens=max_tokens
+                )
+            )
+        
+        logger.info(f"✅ Processing completed: {len(result.chunks)} chunks, {result.total_tokens} tokens")
+        
+        return {
+            "message": "File processed successfully",
+            "filename": file.filename,
+            "chunks": len(result.chunks),
+            "total_tokens": result.total_tokens,
+            "average_chunk_size": result.total_tokens // len(result.chunks) if result.chunks else 0,
+            "preview": [
+                {
+                    "text": chunk.text[:100] + "..." if len(chunk.text) > 100 else chunk.text,
+                    "tokens": getattr(chunk, 'tokens', 0)
+                }
+                for chunk in result.chunks[:3]
+            ],
+            "environment": settings.ENVIRONMENT
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Processing failed for {file.filename}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "message": "File processing failed",
+                "error": str(e),
+                "filename": file.filename,
+                "suggestion": "Please try a different file or contact support"
+            }
+        )
+    finally:
+        # Cleanup temp file
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except Exception as cleanup_error:
+            logger.warning(f"⚠️ Failed to cleanup temp file: {cleanup_error}")
+
+# Import API routes (fallback if not available)
 try:
     from backend.api.v1.main import api_router
     app.include_router(api_router, prefix="/api/v1")
     logger.info("✅ API routes successfully loaded")
 except ImportError as e:
     logger.warning(f"⚠️ Failed to load API routes: {e}")
-    
-    # Fallback quick-process endpoint for Railway testing
-    @app.post("/api/v1/quick-process")
-    async def fallback_quick_process(file: UploadFile = File(...)):
-        """Fallback quick process endpoint for testing"""
-        logger.info(f"📁 Processing file: {file.filename}")
-        
-        if not WOLFCORE_AVAILABLE:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": "Wolfcore not available",
-                    "message": "Service temporarily unavailable",
-                    "filename": file.filename,
-                    "environment": settings.ENVIRONMENT
-                }
-            )
-        
-        try:
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as temp_file:
-                content = await file.read()
-                temp_file.write(content)
-                temp_file_path = temp_file.name
-            
-            # Initialize Wolfstitch
-            wolfstitch = WOLFSTITCH_CLASS()
-            
-            # Process file
-            result = wolfstitch.process_file(temp_file_path)
-            
-            # Clean up
-            os.unlink(temp_file_path)
-            
-            return {
-                "status": "success",
-                "filename": file.filename,
-                "result": result,
-                "environment": settings.ENVIRONMENT
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Processing error: {e}")
-            # Clean up on error
-            if 'temp_file_path' in locals():
-                try:
-                    os.unlink(temp_file_path)
-                except:
-                    pass
-            
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "Processing failed",
-                    "message": str(e),
-                    "filename": file.filename
-                }
-            )
+    logger.info("🔧 Using fallback quick-process endpoint")
+
+# Advanced processing endpoint (future use)
+@app.post("/api/v1/process")
+async def process_file_advanced(
+    file: UploadFile = File(...),
+    config: Optional[dict] = None
+):
+    """Advanced file processing with custom configuration"""
+    # Placeholder for future advanced processing features
+    return {
+        "message": "Advanced processing endpoint - coming soon",
+        "filename": file.filename,
+        "status": "pending_implementation"
+    }
 
 # Custom error handlers
 @app.exception_handler(404)
