@@ -3,6 +3,8 @@
 import React, { useState, useRef } from 'react';
 import { 
   Upload, 
+  File, 
+  Code, 
   FileText, 
   Download, 
   CheckCircle, 
