@@ -12,7 +12,7 @@ Extracted from desktop app's processing/splitter.py with cloud enhancements:
 
 import re
 import logging
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class TextChunker:
         """
         self.config = config or ChunkingConfig()
     
-    def chunk_text(self, text: str, tokenizer_func=None) -> List[Chunk]:
+    def chunk_text(self, text: str, tokenizer_func: Optional[Callable[[str], int]] = None) -> List[Chunk]:
         """
         Chunk text using the configured method
         
@@ -90,7 +90,7 @@ class TextChunker:
             logger.warning(f"Unknown chunking method: {self.config.method}, falling back to paragraph")
             return self._chunk_by_paragraphs(text, tokenizer_func)
     
-    def _chunk_by_paragraphs(self, text: str, tokenizer_func) -> List[Chunk]:
+    def _chunk_by_paragraphs(self, text: str, tokenizer_func: Callable[[str], int]) -> List[Chunk]:
         """
         Chunk text by paragraphs, combining until max_tokens reached
         
@@ -99,7 +99,7 @@ class TextChunker:
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         return self._combine_into_chunks(paragraphs, text, tokenizer_func, "\n\n")
     
-    def _chunk_by_sentences(self, text: str, tokenizer_func) -> List[Chunk]:
+    def _chunk_by_sentences(self, text: str, tokenizer_func: Callable[[str], int]) -> List[Chunk]:
         """
         Chunk text by sentences, combining until max_tokens reached
         
@@ -110,94 +110,77 @@ class TextChunker:
         sentences = [s.strip() for s in sentences if s.strip()]
         return self._combine_into_chunks(sentences, text, tokenizer_func, " ")
     
-    def _chunk_by_custom_delimiter(self, text: str, tokenizer_func) -> List[Chunk]:
+    def _chunk_by_custom_delimiter(self, text: str, tokenizer_func: Callable[[str], int]) -> List[Chunk]:
         """
         Chunk text by custom delimiter
         
         Useful for structured text with specific separators.
         """
         if not self.config.custom_delimiter:
-            logger.warning("Custom delimiter not specified, falling back to paragraph chunking")
-            return self._chunk_by_paragraphs(text, tokenizer_func)
+            raise ValueError("Custom delimiter is required for custom chunking method")
         
-        parts = text.split(self.config.custom_delimiter)
-        parts = [p.strip() for p in parts if p.strip()]
-        return self._combine_into_chunks(parts, text, tokenizer_func, self.config.custom_delimiter)
+        parts = [p.strip() for p in text.split(self.config.custom_delimiter) if p.strip()]
+        chunks = self._combine_into_chunks(parts, text, tokenizer_func, self.config.custom_delimiter)
+        
+        # Add separator metadata
+        for chunk in chunks:
+            chunk.metadata["separator"] = self.config.custom_delimiter
+        
+        return chunks
     
-    def _chunk_token_aware(self, text: str, tokenizer_func) -> List[Chunk]:
+    def _chunk_token_aware(self, text: str, tokenizer_func: Callable[[str], int]) -> List[Chunk]:
         """
-        Advanced token-aware chunking with sliding window and overlap
+        Token-aware chunking that splits at word boundaries while respecting token limits
         
-        This method prioritizes token limits while trying to preserve
-        natural boundaries where possible.
+        This method provides the most precise token control but may break at arbitrary points.
         """
-        chunks = []
         words = text.split()
-        current_chunk_words = []
+        if not words:
+            return []
+        
+        chunks = []
+        current_words = []
         current_tokens = 0
         chunk_index = 0
-        text_position = 0
         
         for word in words:
             word_tokens = tokenizer_func(word)
             
-            # Check if adding this word would exceed max_tokens
-            if current_tokens + word_tokens > self.config.max_tokens and current_chunk_words:
+            # Check if adding this word would exceed the limit
+            if current_tokens + word_tokens > self.config.max_tokens and current_words:
                 # Create chunk from current words
-                chunk_text = " ".join(current_chunk_words)
-                chunk_start = text_position - len(chunk_text)
-                
-                chunk = Chunk(
-                    text=chunk_text,
-                    token_count=current_tokens,
-                    start_position=max(0, chunk_start),
-                    end_position=text_position,
-                    chunk_index=chunk_index,
-                    metadata={
-                        "method": "token_aware",
-                        "word_count": len(current_chunk_words)
-                    }
+                chunk_text = " ".join(current_words)
+                chunk = self._create_chunk(
+                    chunk_text, current_tokens, chunk_index, text, "token_aware"
                 )
                 chunks.append(chunk)
                 
                 # Handle overlap if configured
                 if self.config.overlap_tokens > 0:
-                    overlap_words = self._get_overlap_words(current_chunk_words, tokenizer_func)
-                    current_chunk_words = overlap_words
+                    overlap_words = self._get_overlap_words(current_words, tokenizer_func)
+                    current_words = overlap_words
                     current_tokens = sum(tokenizer_func(w) for w in overlap_words)
                 else:
-                    current_chunk_words = []
+                    current_words = []
                     current_tokens = 0
                 
                 chunk_index += 1
             
-            current_chunk_words.append(word)
+            current_words.append(word)
             current_tokens += word_tokens
-            text_position += len(word) + 1  # +1 for space
         
-        # Add final chunk if any words remain
-        if current_chunk_words:
-            chunk_text = " ".join(current_chunk_words)
-            chunk_start = text_position - len(chunk_text)
-            
-            chunk = Chunk(
-                text=chunk_text,
-                token_count=current_tokens,
-                start_position=max(0, chunk_start),
-                end_position=text_position,
-                chunk_index=chunk_index,
-                metadata={
-                    "method": "token_aware",
-                    "word_count": len(current_chunk_words)
-                }
+        # Create final chunk if there are remaining words
+        if current_words:
+            chunk_text = " ".join(current_words)
+            chunk = self._create_chunk(
+                chunk_text, current_tokens, chunk_index, text, "token_aware"
             )
             chunks.append(chunk)
         
-        logger.debug(f"Token-aware chunking created {len(chunks)} chunks")
         return chunks
     
     def _combine_into_chunks(self, parts: List[str], original_text: str, 
-                           tokenizer_func, separator: str) -> List[Chunk]:
+                           tokenizer_func: Callable[[str], int], separator: str) -> List[Chunk]:
         """
         Combine text parts into chunks respecting token limits
         
@@ -208,77 +191,106 @@ class TextChunker:
             separator: Separator used between parts
             
         Returns:
-            List of chunks
+            List of Chunk objects
         """
+        if not parts:
+            return []
+        
         chunks = []
         current_parts = []
         current_tokens = 0
         chunk_index = 0
-        text_position = 0
         
         for part in parts:
             part_tokens = tokenizer_func(part)
             
-            # Check if adding this part would exceed max_tokens
-            if current_tokens + part_tokens > self.config.max_tokens and current_parts:
+            # Check if adding this part would exceed the limit
+            if (current_tokens + part_tokens > self.config.max_tokens and 
+                current_parts and 
+                len(current_parts) > 0):
+                
                 # Create chunk from current parts
                 chunk_text = separator.join(current_parts)
-                chunk_start = self._find_text_position(original_text, chunk_text, text_position)
-                
-                chunk = Chunk(
-                    text=chunk_text,
-                    token_count=current_tokens,
-                    start_position=chunk_start,
-                    end_position=chunk_start + len(chunk_text),
-                    chunk_index=chunk_index,
-                    metadata={
-                        "method": self.config.method,
-                        "part_count": len(current_parts),
-                        "separator": separator
-                    }
+                chunk = self._create_chunk(
+                    chunk_text, current_tokens, chunk_index, original_text, self.config.method
                 )
                 chunks.append(chunk)
                 
+                # Start new chunk
                 current_parts = []
                 current_tokens = 0
                 chunk_index += 1
             
-            # Add part to current chunk (even if it exceeds limit by itself)
             current_parts.append(part)
             current_tokens += part_tokens
         
-        # Add final chunk if any parts remain
+        # Create final chunk if there are remaining parts
         if current_parts:
             chunk_text = separator.join(current_parts)
-            chunk_start = self._find_text_position(original_text, chunk_text, text_position)
-            
-            chunk = Chunk(
-                text=chunk_text,
-                token_count=current_tokens,
-                start_position=chunk_start,
-                end_position=chunk_start + len(chunk_text),
-                chunk_index=chunk_index,
-                metadata={
-                    "method": self.config.method,
-                    "part_count": len(current_parts),
-                    "separator": separator
-                }
+            chunk = self._create_chunk(
+                chunk_text, current_tokens, chunk_index, original_text, self.config.method
             )
             chunks.append(chunk)
         
-        logger.debug(f"Combined chunking created {len(chunks)} chunks from {len(parts)} parts")
         return chunks
     
-    def _get_overlap_words(self, words: List[str], tokenizer_func) -> List[str]:
+    def _create_chunk(self, text: str, token_count: int, chunk_index: int, 
+                     original_text: str, method: str) -> Chunk:
         """
-        Get overlap words for sliding window chunking
+        Create a Chunk object with calculated positions and metadata
         
-        Returns the last N words that fit within the overlap token limit.
+        Args:
+            text: Chunk text content
+            token_count: Number of tokens in chunk
+            chunk_index: Index of this chunk
+            original_text: Original text for position calculation
+            method: Chunking method used
+            
+        Returns:
+            Chunk object
         """
+        # Calculate positions in original text
+        start_pos = original_text.find(text.strip()[:50])  # Use first 50 chars for search
+        if start_pos == -1:
+            start_pos = 0
+        end_pos = start_pos + len(text)
+        
+        # Create metadata
+        metadata = {
+            "method": method,
+            "max_tokens": self.config.max_tokens,
+            "overlap_tokens": self.config.overlap_tokens,
+            "character_count": len(text),
+            "word_count": len(text.split())
+        }
+        
+        return Chunk(
+            text=text,
+            token_count=token_count,
+            start_position=start_pos,
+            end_position=end_pos,
+            chunk_index=chunk_index,
+            metadata=metadata
+        )
+    
+    def _get_overlap_words(self, words: List[str], tokenizer_func: Callable[[str], int]) -> List[str]:
+        """
+        Get words for overlap based on overlap_tokens configuration
+        
+        Args:
+            words: List of words from previous chunk
+            tokenizer_func: Function to count tokens
+            
+        Returns:
+            List of words for overlap
+        """
+        if self.config.overlap_tokens <= 0:
+            return []
+        
         overlap_words = []
         overlap_tokens = 0
         
-        # Work backwards from the end of the chunk
+        # Take words from the end until we reach overlap_tokens
         for word in reversed(words):
             word_tokens = tokenizer_func(word)
             if overlap_tokens + word_tokens <= self.config.overlap_tokens:
@@ -289,57 +301,40 @@ class TextChunker:
         
         return overlap_words
     
-    def _find_text_position(self, text: str, chunk_text: str, hint_position: int) -> int:
-        """
-        Find the position of chunk_text in the original text
-        
-        Uses hint_position to search efficiently.
-        """
-        try:
-            # Search around the hint position first
-            search_start = max(0, hint_position - 100)
-            search_end = min(len(text), hint_position + len(chunk_text) + 100)
-            search_area = text[search_start:search_end]
-            
-            position = search_area.find(chunk_text)
-            if position != -1:
-                return search_start + position
-            
-            # Fallback to full text search
-            position = text.find(chunk_text)
-            return max(0, position)
-        except Exception:
-            # If all else fails, return hint position
-            return hint_position
-    
     def _estimate_tokens(self, text: str) -> int:
         """
-        Simple word-based token estimation
+        Default token estimation function using word count
         
-        This is a fallback when no tokenizer function is provided.
-        Uses a rough 1.3 tokens per word ratio.
+        This provides a reasonable estimate for most use cases.
+        For more accurate tokenization, pass a custom tokenizer_func.
+        
+        Args:
+            text: Text to estimate tokens for
+            
+        Returns:
+            Estimated token count
         """
-        word_count = len(text.split())
-        return int(word_count * 1.3)
+        if not text.strip():
+            return 0
+        
+        # Basic word-based estimation (1 word ≈ 1.3 tokens on average)
+        words = len(text.split())
+        return max(1, int(words * 1.3))
 
 
-# Convenience functions for backward compatibility
-def split_text(text: str, method: str = "paragraph", delimiter: Optional[str] = None,
-               max_tokens: int = 1024) -> List[str]:
+# Utility functions for backward compatibility and simple usage
+
+def split_text(text: str, method: str = "paragraph", delimiter: Optional[str] = None) -> List[str]:
     """
-    Simple text splitting function for backward compatibility
+    Simple text splitting function without chunking logic
     
     Args:
         text: Text to split
-        method: Splitting method ("paragraph", "sentence", "custom")
-        delimiter: Custom delimiter (required if method="custom")
-        max_tokens: Maximum tokens per chunk
+        method: Split method (paragraph, sentence, custom)
+        delimiter: Custom delimiter for custom method
         
     Returns:
-        List of text chunks (strings only, no metadata)
-        
-    Raises:
-        ValueError: If method is invalid or delimiter is missing for custom method
+        List of text parts
     """
     if method == "paragraph":
         return [p.strip() for p in text.split("\n\n") if p.strip()]
@@ -379,7 +374,7 @@ def chunk_text_simple(text: str, method: str = "paragraph", max_tokens: int = 10
 
 # Async versions for cloud processing
 async def chunk_text_async(text: str, config: Optional[ChunkingConfig] = None,
-                          tokenizer_func=None) -> List[Chunk]:
+                          tokenizer_func: Optional[Callable[[str], int]] = None) -> List[Chunk]:
     """
     Async wrapper for text chunking to support cloud processing
     
@@ -393,6 +388,9 @@ async def chunk_text_async(text: str, config: Optional[ChunkingConfig] = None,
     """
     # For now, chunking is CPU-bound and fast enough to run synchronously
     # In future, could use asyncio.to_thread for very large texts
+    if config is None:
+        config = ChunkingConfig()
+    
     chunker = TextChunker(config)
     return chunker.chunk_text(text, tokenizer_func)
 
