@@ -10,9 +10,7 @@ import {
   Zap,
   Activity,
   AlertCircle,
-  RefreshCw,
-  File,
-  Code
+  RefreshCw
 } from 'lucide-react';
 
 // Fixed Types for API responses
@@ -64,7 +62,6 @@ const WolfstitchApp = () => {
   // Configuration - Using environment variables
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.wolfstitch.dev';
   const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Wolfstitch';
-  const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
 
   // Enhanced file processing function
   const processFiles = async (files: File[], downloadImmediately: boolean = false) => {
@@ -129,9 +126,8 @@ const WolfstitchApp = () => {
       
       // If we got full chunks and should download immediately
       if (downloadImmediately && result.data) {
-        console.log('Full chunks received, initiating download...');
         downloadFullResults(result);
-        // Keep the existing result in state
+        // Don't update the main result to avoid confusion
         if (!processingResult) {
           setProcessingResult(result);
         }
@@ -163,8 +159,6 @@ const WolfstitchApp = () => {
       alert('Full chunk data not available. The file may need to be reprocessed.');
       return;
     }
-
-    console.log(`Creating JSONL with ${result.data.length} full chunks`);
 
     // Create JSONL content with FULL text
     const jsonlContent = result.data.map((chunk: FullChunk) => 
@@ -242,6 +236,8 @@ const WolfstitchApp = () => {
     } catch (error) {
       console.error('Download error:', error);
       alert('Failed to download full results. Please try again.');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -285,44 +281,6 @@ const WolfstitchApp = () => {
     setIsDownloading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
-    }
-  };
-
-  // Format file size
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  // Get file icon based on extension
-  const getFileIcon = (fileName: string) => {
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    switch (extension) {
-      case 'pdf':
-        return <FileText className="w-5 h-5 text-red-400" />;
-      case 'docx':
-      case 'doc':
-        return <FileText className="w-5 h-5 text-blue-400" />;
-      case 'pptx':
-      case 'ppt':
-        return <FileText className="w-5 h-5 text-orange-400" />;
-      case 'xlsx':
-      case 'xls':
-        return <FileText className="w-5 h-5 text-green-400" />;
-      case 'txt':
-      case 'md':
-      case 'markdown':
-        return <FileText className="w-5 h-5 text-gray-400" />;
-      case 'py':
-      case 'js':
-      case 'ts':
-      case 'json':
-        return <Code className="w-5 h-5 text-purple-400" />;
-      default:
-        return <File className="w-5 h-5 text-gray-400" />;
     }
   };
 
@@ -370,9 +328,9 @@ const WolfstitchApp = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#1B1F2E] text-white">
+    <div className="min-h-screen bg-[#0B0F1A] text-white">
       {/* Header */}
-      <header className="sticky top-0 z-50 backdrop-blur-md bg-[rgba(27,31,46,0.8)] border-b border-gray-700">
+      <header className="sticky top-0 z-50 backdrop-blur-md bg-[rgba(11,15,26,0.8)] border-b border-gray-800">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -383,44 +341,34 @@ const WolfstitchApp = () => {
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] bg-clip-text text-transparent">
                   {APP_NAME}
                 </h1>
-                <p className="text-xs text-gray-400">AI Dataset Platform</p>
+                <p className="text-xs text-gray-400">Intelligent Document Processing</p>
               </div>
             </div>
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2">
                 <Activity className="w-4 h-4 text-[#4ECDC4]" />
-                <span className="text-sm text-gray-300">
-                  {ENVIRONMENT === 'production' ? 'Production Ready' : 'Development Mode'}
-                </span>
+                <span className="text-sm text-gray-300">v2.0</span>
               </div>
-              <div className="w-2 h-2 bg-[#4ECDC4] rounded-full animate-pulse"></div>
             </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-12 max-w-5xl">
+      <main className="container mx-auto px-6 py-12 max-w-4xl">
         {/* Upload Section */}
         {processingStep === 'upload' && (
           <section>
             <div className="text-center mb-12 space-y-4">
               <h2 className="text-4xl font-bold">
-                Transform Documents into
+                Transform Your Documents into
                 <span className="block bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] bg-clip-text text-transparent">
-                  AI-Ready Datasets
+                  AI-Ready Chunks
                 </span>
               </h2>
               <p className="text-gray-300 text-lg max-w-2xl mx-auto">
-                Professional-grade document processing with intelligent chunking, 40+ file formats, and beautiful export options
+                Upload any document and watch as Wolfstitch intelligently processes, cleans, and chunks your content for optimal AI consumption.
               </p>
-              {ENVIRONMENT === 'development' && (
-                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mx-auto max-w-md">
-                  <p className="text-yellow-300 text-sm">
-                    🚧 Development Mode - API: {API_BASE_URL}
-                  </p>
-                </div>
-              )}
             </div>
 
             {/* Upload Area */}
@@ -441,20 +389,16 @@ const WolfstitchApp = () => {
                 
                 <div 
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-[#FF6B47] bg-[rgba(255,107,71,0.1)] hover:bg-[rgba(255,107,71,0.15)] rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 shadow-lg shadow-[rgba(255,107,71,0.2)]"
+                  className="border-2 border-dashed border-gray-600 rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 hover:border-[#4ECDC4] hover:bg-[rgba(78,205,196,0.05)] group-hover:shadow-lg group-hover:shadow-[rgba(78,205,196,0.1)]"
                 >
-                  <Upload className="w-16 h-16 mx-auto mb-4 text-[#FF6B47]" />
+                  <Upload className="w-16 h-16 mx-auto mb-4 text-gray-400 group-hover:text-[#4ECDC4] transition-colors" />
                   <h3 className="text-xl font-semibold mb-2">
-                    Drop files here or click to browse
+                    Drop your files here
                   </h3>
                   <p className="text-gray-400 mb-4">
-                    PDF, DOCX, TXT, code files, presentations, or entire folders
+                    or click to browse
                   </p>
-                  <button className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105">
-                    <Upload className="w-5 h-5 mr-2" />
-                    Choose Files
-                  </button>
-                  <p className="text-sm text-gray-500 mt-4">
+                  <p className="text-sm text-gray-500">
                     Supports PDF, DOCX, TXT, MD, Code files, and more (up to 100MB)
                   </p>
                 </div>
