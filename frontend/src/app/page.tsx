@@ -4,11 +4,13 @@ import React, { useState, useRef } from 'react';
 import { 
   Upload, 
   File, 
+  Folder, 
   Code, 
   FileText, 
   Download, 
   CheckCircle, 
   Eye,
+  ChevronDown,
   Zap,
   Activity,
   AlertCircle,
@@ -44,8 +46,8 @@ interface ProcessingResult {
   status?: string;
   job_id?: string;
   processing_time?: number;
-  file_info?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  file_info?: any;
+  metadata?: any;
   full_chunks_included?: boolean;
 }
 
@@ -53,6 +55,7 @@ const WolfstitchApp = () => {
   // State management
   const [processingStep, setProcessingStep] = useState<'upload' | 'processing' | 'completed' | 'error'>('upload');
   const [progress, setProgress] = useState(0);
+  const [showFileDetails, setShowFileDetails] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +67,7 @@ const WolfstitchApp = () => {
   // Configuration - Using environment variables
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.wolfstitch.dev';
   const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Wolfstitch';
+  const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
 
   // Enhanced file processing function
   const processFiles = async (files: File[], downloadImmediately: boolean = false) => {
@@ -280,9 +284,38 @@ const WolfstitchApp = () => {
     setSelectedFiles([]);
     setProcessingResult(null);
     setError(null);
+    setShowFileDetails(false);
     setIsDownloading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  // Format file size
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // Get file icon based on extension
+  const getFileIcon = (fileName: string) => {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    switch (extension) {
+      case 'pdf':
+      case 'doc':
+      case 'docx':
+        return <FileText className="w-5 h-5 text-[#4ECDC4]" />;
+      case 'py':
+      case 'js':
+      case 'ts':
+      case 'jsx':
+      case 'tsx':
+        return <Code className="w-5 h-5 text-[#4ECDC4]" />;
+      default:
+        return <File className="w-5 h-5 text-[#4ECDC4]" />;
     }
   };
 
