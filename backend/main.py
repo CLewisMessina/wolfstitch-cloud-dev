@@ -1,7 +1,6 @@
 """
 Wolfstitch Cloud - FastAPI Application Entry Point
 Railway-optimized deployment with enhanced error handling and dependency management
-Enhanced with robust document processing for DOCX, PDF, Excel, PowerPoint, and more
 """
 
 import os
@@ -31,25 +30,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Enhanced document processor import
-try:
-    from backend.services.enhanced_processor import DocumentProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = True
-    logger.info("✅ Enhanced processor successfully imported")
-except ImportError as e:
-    logger.warning(f"⚠️ Enhanced processor import failed: {e}")
-    ENHANCED_PROCESSOR_AVAILABLE = False
-
 # Global variables for dependencies
 WOLFCORE_AVAILABLE = False
 WOLFSTITCH_CLASS = None
-ENHANCED_PROCESSOR_AVAILABLE = ENHANCED_PROCESSOR_AVAILABLE
-enhanced_processor = None
 settings = None
 
 def initialize_dependencies():
     """Initialize all dependencies with graceful fallbacks"""
-    global WOLFCORE_AVAILABLE, WOLFSTITCH_CLASS, ENHANCED_PROCESSOR_AVAILABLE, enhanced_processor, settings
+    global WOLFCORE_AVAILABLE, WOLFSTITCH_CLASS, settings
     
     # Try to import wolfcore
     try:
@@ -59,7 +47,7 @@ def initialize_dependencies():
         logger.info("✅ Wolfcore successfully imported")
     except ImportError as e:
         logger.warning(f"⚠️ Wolfcore import failed: {e}")
-        logger.warning("🔧 Continuing with enhanced processor only")
+        logger.warning("🔧 Continuing with limited functionality")
         WOLFCORE_AVAILABLE = False
 
     # Try to import settings
@@ -79,15 +67,6 @@ def initialize_dependencies():
         settings = Settings()
         logger.info("🔧 Using fallback configuration")
 
-    # Try to initialize enhanced processor
-    try:
-        if ENHANCED_PROCESSOR_AVAILABLE:
-            enhanced_processor = DocumentProcessor()
-            logger.info("✅ Enhanced processor initialized")
-    except Exception as e:
-        logger.warning(f"⚠️ Enhanced processor initialization failed: {e}")
-        ENHANCED_PROCESSOR_AVAILABLE = False
-
 # Initialize dependencies
 initialize_dependencies()
 
@@ -104,7 +83,6 @@ async def lifespan(app: FastAPI):
     # Log configuration status
     logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🧠 Wolfcore available: {WOLFCORE_AVAILABLE}")
-    logger.info(f"🔧 Enhanced processor available: {ENHANCED_PROCESSOR_AVAILABLE}")
     logger.info(f"🐍 Python path: {sys.path[:3]}...")  # First 3 paths
     
     yield
@@ -160,8 +138,8 @@ def get_trusted_hosts():
 # Create FastAPI application
 app = FastAPI(
     title="Wolfstitch Cloud API",
-    description="AI Dataset Preparation Platform - Cloud Native with Enhanced Document Processing",
-    version="2.0.0",
+    description="AI Dataset Preparation Platform - Cloud Native",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -197,18 +175,13 @@ async def health_check():
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
         "wolfcore_available": WOLFCORE_AVAILABLE,
-        "enhanced_processor_available": ENHANCED_PROCESSOR_AVAILABLE,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "cors_origins": cors_origins,
         "trusted_hosts": trusted_hosts,
         "railway_url": os.getenv("RAILWAY_PUBLIC_DOMAIN", "Not set"),
         "port": os.getenv("PORT", "8000"),
         "service": "wolfstitch-cloud-api",
-        "timestamp": asyncio.get_event_loop().time(),
-        "processing_engines": {
-            "enhanced": ENHANCED_PROCESSOR_AVAILABLE,
-            "wolfcore_fallback": WOLFCORE_AVAILABLE
-        }
+        "timestamp": asyncio.get_event_loop().time()
     }
 
 # Root endpoint
@@ -216,36 +189,38 @@ async def health_check():
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "Wolfstitch Cloud API v2.0",
-        "version": "2.0.0",
+        "message": "Wolfstitch Cloud API",
+        "version": "1.0.0",
         "environment": settings.ENVIRONMENT,
         "docs": "/docs",
         "health": "/health",
         "api_endpoints": "/api/v1/",
         "status": "operational",
-        "processing_engines": {
-            "enhanced_processor": "available" if ENHANCED_PROCESSOR_AVAILABLE else "unavailable",
-            "wolfcore_fallback": "available" if WOLFCORE_AVAILABLE else "unavailable"
-        },
-        "features": {
-            "enhanced_docx_processing": ENHANCED_PROCESSOR_AVAILABLE,
-            "enhanced_pdf_processing": ENHANCED_PROCESSOR_AVAILABLE,
-            "enhanced_excel_processing": ENHANCED_PROCESSOR_AVAILABLE,
-            "enhanced_powerpoint_processing": ENHANCED_PROCESSOR_AVAILABLE
-        }
+        "wolfcore_status": "available" if WOLFCORE_AVAILABLE else "unavailable"
     }
 
-# Enhanced file processing endpoint
+# File processing endpoint
 @app.post("/api/v1/quick-process")
 async def quick_process_file(
     file: UploadFile = File(...),
-    tokenizer: Optional[str] = "word-estimate",
-    max_tokens: Optional[int] = 1024
+    tokenizer: Optional[str] = "gpt-4",
+    max_tokens: Optional[int] = 1000
 ):
     """
-    Enhanced file processing with robust format support
-    Supports DOCX, PDF, Excel, PowerPoint, HTML, EPUB, and more
+    Process uploaded file into chunks
+    Supports 40+ file formats when wolfcore is available
     """
+    if not WOLFCORE_AVAILABLE:
+        logger.error("Wolfcore not available for file processing")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "File processing service unavailable",
+                "error": "Wolfcore dependency not loaded",
+                "suggestion": "Please check server configuration"
+            }
+        )
+    
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
     
@@ -258,109 +233,69 @@ async def quick_process_file(
             detail=f"File too large. Maximum size is 100MB, got {len(content) / 1024 / 1024:.1f}MB"
         )
     
-    logger.info(f"📄 Processing file: {file.filename} ({len(content) / 1024 / 1024:.1f}MB)")
+    # Reset file pointer
+    await file.seek(0)
+    
+    logger.info(f"Processing file: {file.filename} ({len(content)} bytes)")
     
     # Create temporary file
     with tempfile.NamedTemporaryFile(
         delete=False, 
         suffix=f".{file.filename.split('.')[-1]}"
     ) as tmp:
+        content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
     
     try:
-        # Try enhanced processor first
-        if ENHANCED_PROCESSOR_AVAILABLE and enhanced_processor:
-            try:
-                logger.info("🔧 Using enhanced document processor")
-                result = await enhanced_processor.process_file(
-                    tmp_path,
-                    max_tokens=max_tokens,
-                    tokenizer=tokenizer
-                )
-                
-                logger.info(f"✅ Enhanced processing completed: {result['chunk_count']} chunks, {result['total_tokens']} tokens")
-                
-                # Format response for frontend compatibility
-                return {
-                    "message": "File processed successfully with enhanced processor",
-                    "filename": file.filename,
-                    "chunks": result["chunk_count"],
-                    "total_tokens": result["total_tokens"],
-                    "average_chunk_size": result["total_tokens"] // result["chunk_count"] if result["chunk_count"] > 0 else 0,
-                    "preview": [
-                        {
-                            "text": chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"],
-                            "tokens": chunk["tokens"]
-                        }
-                        for chunk in result["chunks"][:3]
-                    ],
-                    "processing_method": "enhanced",
-                    "supported_formats": enhanced_processor.get_supported_formats() if hasattr(enhanced_processor, 'get_supported_formats') else [],
-                    "environment": settings.ENVIRONMENT
-                }
-                
-            except Exception as enhanced_error:
-                logger.warning(f"⚠️ Enhanced processor failed: {enhanced_error}")
-                # Fall through to wolfcore fallback
+        # Process with wolfcore
+        wf = WOLFSTITCH_CLASS()
         
-        # Fallback to wolfcore if available
-        if WOLFCORE_AVAILABLE:
-            logger.info("🔄 Falling back to wolfcore processor")
-            wf = WOLFSTITCH_CLASS()
-            
-            if hasattr(wf, 'process_file_async'):
-                logger.info("Using async wolfcore processing method")
-                result = await wf.process_file_async(
+        # Use async processing to avoid event loop conflicts
+        if hasattr(wf, 'process_file_async'):
+            logger.info("Using async processing method")
+            result = await wf.process_file_async(
+                tmp_path,
+                tokenizer=tokenizer,
+                max_tokens=max_tokens
+            )
+        else:
+            # Fallback to sync processing (should not happen in current wolfcore)
+            logger.warning("Falling back to sync processing method")
+            # Run sync method in thread pool to avoid blocking
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, 
+                lambda: wf.process_file(
                     tmp_path,
                     tokenizer=tokenizer,
                     max_tokens=max_tokens
                 )
-            else:
-                logger.warning("Falling back to sync wolfcore processing method")
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    lambda: wf.process_file(tmp_path, tokenizer=tokenizer, max_tokens=max_tokens)
-                )
-            
-            logger.info(f"✅ Wolfcore processing completed: {len(result.chunks)} chunks, {result.total_tokens} tokens")
-            
-            return {
-                "message": "File processed successfully with wolfcore fallback",
-                "filename": file.filename,
-                "chunks": len(result.chunks),
-                "total_tokens": result.total_tokens,
-                "average_chunk_size": result.total_tokens // len(result.chunks) if result.chunks else 0,
-                "preview": [
-                    {
-                        "text": chunk.text[:200] + "..." if len(chunk.text) > 200 else chunk.text,
-                        "tokens": getattr(chunk, 'tokens', 0)
-                    }
-                    for chunk in result.chunks[:3]
-                ],
-                "processing_method": "wolfcore_fallback",
-                "environment": settings.ENVIRONMENT
-            }
-        else:
-            # No processing engines available
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "message": "No document processing engine available",
-                    "enhanced_processor": ENHANCED_PROCESSOR_AVAILABLE,
-                    "wolfcore_available": WOLFCORE_AVAILABLE,
-                    "suggestion": "Check server configuration and dependencies"
-                }
             )
         
-    except HTTPException:
-        raise
+        logger.info(f"✅ Processing completed: {len(result.chunks)} chunks, {result.total_tokens} tokens")
+        
+        return {
+            "message": "File processed successfully",
+            "filename": file.filename,
+            "chunks": len(result.chunks),
+            "total_tokens": result.total_tokens,
+            "average_chunk_size": result.total_tokens // len(result.chunks) if result.chunks else 0,
+            "preview": [
+                {
+                    "text": chunk.text[:100] + "..." if len(chunk.text) > 100 else chunk.text,
+                    "tokens": getattr(chunk, 'tokens', 0)
+                }
+                for chunk in result.chunks[:3]
+            ],
+            "environment": settings.ENVIRONMENT
+        }
+        
     except Exception as e:
         logger.error(f"❌ Processing failed for {file.filename}: {e}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={
-                "message": "Processing error occurred",
+            content={
+                "message": "File processing failed",
                 "error": str(e),
                 "filename": file.filename,
                 "suggestion": "Please try a different file or contact support"
@@ -394,48 +329,8 @@ async def process_file_advanced(
     return {
         "message": "Advanced processing endpoint - coming soon",
         "filename": file.filename,
-        "status": "pending_implementation",
-        "enhanced_processor_available": ENHANCED_PROCESSOR_AVAILABLE
+        "status": "pending_implementation"
     }
-
-# Enhanced diagnostic endpoints (development only)
-if settings and hasattr(settings, 'ENVIRONMENT') and settings.ENVIRONMENT.lower() != "production":
-    
-    @app.get("/api/v1/test-enhanced")
-    async def test_enhanced_processor():
-        """Test the enhanced processor capabilities"""
-        
-        if not ENHANCED_PROCESSOR_AVAILABLE:
-            return {
-                "status": "unavailable",
-                "message": "Enhanced processor not available",
-                "suggestion": "Check dependencies installation"
-            }
-        
-        try:
-            supported_formats = enhanced_processor.get_supported_formats() if hasattr(enhanced_processor, 'get_supported_formats') else []
-            
-            return {
-                "status": "available",
-                "enhanced_processor_working": True,
-                "supported_formats": supported_formats,
-                "total_formats": len(supported_formats),
-                "capabilities": {
-                    "docx_processing": "python-docx integration",
-                    "pdf_processing": "dual-engine (pdfplumber + PyPDF2)",
-                    "excel_processing": "openpyxl + pandas",
-                    "powerpoint_processing": "python-pptx",
-                    "html_processing": "beautifulsoup4",
-                    "epub_processing": "ebooklib"
-                }
-            }
-            
-        except Exception as e:
-            return {
-                "status": "error",
-                "enhanced_processor_working": False,
-                "error": str(e)
-            }
 
 # Custom error handlers
 @app.exception_handler(404)
@@ -459,8 +354,7 @@ async def internal_error_handler(request, exc):
         content={
             "message": "Internal server error",
             "detail": str(exc) if settings.DEBUG else "An unexpected error occurred",
-            "suggestion": "Please try again or contact support if the problem persists",
-            "enhanced_processor_available": ENHANCED_PROCESSOR_AVAILABLE
+            "suggestion": "Please try again or contact support if the problem persists"
         }
     )
 
@@ -473,8 +367,6 @@ if __name__ == "__main__":
     logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🔧 CORS origins: {cors_origins}")
     logger.info(f"🔒 Trusted hosts: {trusted_hosts}")
-    logger.info(f"🧠 Enhanced processor: {ENHANCED_PROCESSOR_AVAILABLE}")
-    logger.info(f"🔄 Wolfcore fallback: {WOLFCORE_AVAILABLE}")
     
     uvicorn.run(
         "backend.main:app",
