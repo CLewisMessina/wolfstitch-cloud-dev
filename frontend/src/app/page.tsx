@@ -13,42 +13,24 @@ import {
   ChevronDown,
   Zap,
   Activity,
-  AlertCircle,
-  RefreshCw
+  AlertCircle
 } from 'lucide-react';
 
-// Fixed Types for API responses
+// Fixed Types for API responses - matching actual API response structure
 interface ChunkPreview {
   text: string;
   tokens: number;
-  chunk_index?: number;
-  word_count?: number;
-}
-
-interface FullChunk {
-  text: string;
-  chunk_id: number;
-  token_count: number;
-  word_count: number;
-  chunk_index: number;
 }
 
 interface ProcessingResult {
-  message?: string;
+  message: string;
   filename: string;
   chunks?: number;
-  total_chunks?: number;
   total_tokens?: number;
   average_chunk_size?: number;
-  preview?: ChunkPreview[];
-  data?: FullChunk[];  // Full chunks when requested
+  preview?: ChunkPreview[];  // Fixed: Changed from string[] to ChunkPreview[]
   error?: string;
   status?: string;
-  job_id?: string;
-  processing_time?: number;
-  file_info?: any;
-  metadata?: any;
-  full_chunks_included?: boolean;
 }
 
 const WolfstitchApp = () => {
@@ -59,18 +41,17 @@ const WolfstitchApp = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
   
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Configuration - Using environment variables
+  // Configuration - Now using environment variables
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.wolfstitch.dev';
   const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Wolfstitch';
   const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
 
-  // Enhanced file processing function
-  const processFiles = async (files: File[], downloadImmediately: boolean = false) => {
+  // File processing function
+  const processFiles = async (files: File[]) => {
     if (files.length === 0) return;
 
     setError(null);
@@ -95,25 +76,18 @@ const WolfstitchApp = () => {
       formData.append('file', file);
       formData.append('tokenizer', 'word-estimate');
       formData.append('max_tokens', '1024');
-      
-      // Use different endpoint if downloading immediately
-      const endpoint = downloadImmediately 
-        ? '/api/v1/process-and-download' 
-        : '/api/v1/quick-process';
-      
-      // Add query param for full chunks if downloading
-      const url = downloadImmediately 
-        ? `${API_BASE_URL}${endpoint}?return_full_chunks=true`
-        : `${API_BASE_URL}${endpoint}`;
 
-      console.log(`Processing file with API: ${url}`);
+      console.log(`Processing file with API: ${API_BASE_URL}`);
       console.log('FormData contents:', {
         fileName: file.name,
         fileSize: file.size,
-        fileType: file.type || 'application/octet-stream'
+        fileType: file.type || 'application/octet-stream'  // Fixed: Provide default if empty
       });
 
-      const response = await fetch(url, {
+      const fullURL = `${API_BASE_URL}/api/v1/quick-process`;
+      console.log('Full API URL:', fullURL);
+
+      const response = await fetch(fullURL, {
         method: 'POST',
         body: formData,
         mode: 'cors',
@@ -129,23 +103,11 @@ const WolfstitchApp = () => {
       const result: ProcessingResult = await response.json();
       
       setProgress(100);
+      setProcessingResult(result);
       
-      // If we got full chunks and should download immediately
-      if (downloadImmediately && result.data) {
-        downloadFullResults(result);
-        // Don't update the main result to avoid confusion
-        if (!processingResult) {
-          setProcessingResult(result);
-        }
-      } else {
-        setProcessingResult(result);
-      }
-      
-      if (!downloadImmediately) {
-        setTimeout(() => {
-          setProcessingStep('completed');
-        }, 500);
-      }
+      setTimeout(() => {
+        setProcessingStep('completed');
+      }, 500);
 
       console.log('Processing completed successfully:', result);
 
@@ -153,103 +115,46 @@ const WolfstitchApp = () => {
       console.error('Processing error:', error);
       setError(error instanceof Error ? error.message : 'Unknown error occurred');
       setProcessingStep('error');
-    } finally {
-      setIsDownloading(false);
     }
   };
 
-  // Download full results with complete text
-  const downloadFullResults = (result: ProcessingResult) => {
-    if (!result.data || !Array.isArray(result.data)) {
-      console.error('No full chunk data available');
-      alert('Full chunk data not available. The file may need to be reprocessed.');
-      return;
-    }
+  // Download functionality - Fixed to handle new preview format
+  const downloadResults = () => {
+    if (!processingResult) return;
 
-    // Create JSONL content with FULL text
-    const jsonlContent = result.data.map((chunk: FullChunk) => 
+    // Create JSONL content - handling both old string[] and new ChunkPreview[] formats
+    const jsonlContent = processingResult.preview?.map((chunk, index) => 
       JSON.stringify({
-        text: chunk.text,  // Full text, not truncated!
-        chunk_id: chunk.chunk_id,
-        tokens: chunk.token_count,
-        word_count: chunk.word_count,
+        text: typeof chunk === 'string' ? chunk : chunk.text,  // Fixed: Handle both formats
+        chunk_id: index + 1,
+        tokens: typeof chunk === 'string' 
+          ? Math.floor((processingResult.total_tokens || 131) / (processingResult.chunks || 1))
+          : chunk.tokens,  // Fixed: Use actual tokens from chunk
         metadata: {
-          filename: result.filename,
-          processed_at: new Date().toISOString(),
-          chunk_index: chunk.chunk_index,
-          job_id: result.job_id
+          filename: processingResult.filename,
+          processed_at: new Date().toISOString()
         }
       })
-    ).join('\n');
+    ).join('\n') || '';
 
     // Create and download file
     const blob = new Blob([jsonlContent], { type: 'application/jsonl' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${result.filename.replace(/\.[^/.]+$/, '')}_processed_full.jsonl`;
+    link.download = `${processingResult.filename.replace(/\.[^/.]+$/, '')}_processed.jsonl`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     
-    console.log('Full download completed:', link.download);
+    console.log('Download initiated:', link.download);
   };
 
-  // Download preview only (original functionality)
-  const downloadPreview = () => {
-    if (!processingResult) return;
-
-    const jsonlContent = processingResult.preview?.map((chunk, index) => 
-      JSON.stringify({
-        text: typeof chunk === 'string' ? chunk : chunk.text,
-        chunk_id: index + 1,
-        tokens: typeof chunk === 'string' 
-          ? Math.floor((processingResult.total_tokens || 0) / (processingResult.chunks || 1))
-          : chunk.tokens,
-        metadata: {
-          filename: processingResult.filename,
-          processed_at: new Date().toISOString(),
-          type: 'preview'
-        }
-      })
-    ).join('\n') || '';
-
-    const blob = new Blob([jsonlContent], { type: 'application/jsonl' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${processingResult.filename.replace(/\.[^/.]+$/, '')}_preview.jsonl`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    
-    console.log('Preview download completed:', link.download);
-  };
-
-  // Main download function - reprocesses to get full chunks
-  const downloadResults = async () => {
-    if (!processingResult || !selectedFiles.length) return;
-
-    try {
-      setIsDownloading(true);
-      console.log('Re-processing file to get full chunks for download...');
-      
-      // Re-process the file with full chunks flag
-      await processFiles(selectedFiles, true);
-      
-    } catch (error) {
-      console.error('Download error:', error);
-      alert('Failed to download full results. Please try again.');
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  // File selection handlers
+  // File selection handlers - Fixed for mobile
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
+    // Mobile fix: Log file details for debugging
     files.forEach(file => {
       console.log('Selected file details:', {
         name: file.name,
@@ -285,7 +190,6 @@ const WolfstitchApp = () => {
     setProcessingResult(null);
     setError(null);
     setShowFileDetails(false);
-    setIsDownloading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -304,172 +208,143 @@ const WolfstitchApp = () => {
   const getFileIcon = (fileName: string) => {
     const extension = fileName.split('.').pop()?.toLowerCase();
     switch (extension) {
-      case 'pdf':
-      case 'doc':
-      case 'docx':
-        return <FileText className="w-5 h-5 text-[#4ECDC4]" />;
-      case 'py':
-      case 'js':
-      case 'ts':
-      case 'jsx':
-      case 'tsx':
-        return <Code className="w-5 h-5 text-[#4ECDC4]" />;
-      default:
-        return <File className="w-5 h-5 text-[#4ECDC4]" />;
+      case 'pdf': return <FileText className="w-5 h-5 text-red-400" />;
+      case 'docx': case 'doc': return <FileText className="w-5 h-5 text-blue-400" />;
+      case 'pptx': case 'ppt': return <FileText className="w-5 h-5 text-orange-400" />;
+      case 'xlsx': case 'xls': return <FileText className="w-5 h-5 text-green-400" />;
+      case 'txt': case 'md': case 'markdown': return <FileText className="w-5 h-5 text-gray-400" />;
+      case 'py': case 'js': case 'ts': case 'json': return <Code className="w-5 h-5 text-purple-400" />;
+      default: return <File className="w-5 h-5 text-gray-400" />;
     }
   };
 
   // Circular progress component
-  const CircularProgress = ({ percentage }: { percentage: number }) => {
-    const radius = 50;
-    const strokeWidth = 8;
-    const normalizedRadius = radius - strokeWidth * 2;
-    const circumference = normalizedRadius * 2 * Math.PI;
-    const strokeDashoffset = circumference - (percentage / 100) * circumference;
-
-    return (
+  const CircularProgress = ({ percentage, size = 140 }: { percentage: number; size?: number }) => (
+    <div className="relative inline-flex items-center justify-center">
       <svg
-        height={radius * 2}
-        width={radius * 2}
         className="transform -rotate-90"
+        width={size}
+        height={size}
       >
         <circle
-          stroke="#374151"
+          cx={size / 2}
+          cy={size / 2}
+          r={size / 2 - 8}
+          stroke="currentColor"
+          strokeWidth="6"
           fill="transparent"
-          strokeWidth={strokeWidth}
-          r={normalizedRadius}
-          cx={radius}
-          cy={radius}
+          className="text-gray-700"
         />
         <circle
-          stroke="url(#gradient)"
+          cx={size / 2}
+          cy={size / 2}
+          r={size / 2 - 8}
+          stroke="currentColor"
+          strokeWidth="6"
           fill="transparent"
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference + ' ' + circumference}
-          style={{ strokeDashoffset }}
-          r={normalizedRadius}
-          cx={radius}
-          cy={radius}
-          className="transition-all duration-300 ease-in-out"
+          strokeDasharray={`${2 * Math.PI * (size / 2 - 8)}`}
+          strokeDashoffset={`${2 * Math.PI * (size / 2 - 8) * (1 - percentage / 100)}`}
+          className="text-[#FF6B47] transition-all duration-500 ease-out"
+          strokeLinecap="round"
         />
-        <defs>
-          <linearGradient id="gradient">
-            <stop offset="0%" stopColor="#FF6B47" />
-            <stop offset="100%" stopColor="#4ECDC4" />
-          </linearGradient>
-        </defs>
       </svg>
-    );
-  };
+      <div className="absolute flex flex-col items-center">
+        <span className="text-3xl font-bold text-white">
+          {Math.round(percentage)}%
+        </span>
+        <span className="text-xs text-gray-300 mt-1">
+          {percentage < 30 && "Parsing"}
+          {percentage >= 30 && percentage < 70 && "Cleaning"}
+          {percentage >= 70 && "Chunking"}
+        </span>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-[#0B0F1A] text-white">
+    <div className="min-h-screen bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f1419]">
       {/* Header */}
-      <header className="sticky top-0 z-50 backdrop-blur-md bg-[rgba(11,15,26,0.8)] border-b border-gray-800">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-[#FF6B47] to-[#E85555] rounded-xl flex items-center justify-center shadow-lg">
-                <Zap className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] bg-clip-text text-transparent">
-                  {APP_NAME}
-                </h1>
-                <p className="text-xs text-gray-400">Intelligent Document Processing</p>
-              </div>
+      <header className="bg-[rgba(26,26,46,0.8)] border-b border-gray-700 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-[#FF6B47] to-[#E85555] rounded-lg flex items-center justify-center shadow-lg">
+              <div className="w-6 h-6 border-2 border-white rounded transform rotate-12 opacity-90"></div>
             </div>
-            <div className="flex items-center space-x-6">
-              <div className="flex items-center space-x-2">
-                <Activity className="w-4 h-4 text-[#4ECDC4]" />
-                <span className="text-sm text-gray-300">v2.0</span>
-              </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">{APP_NAME}</h1>
+              <p className="text-xs text-gray-400">AI Dataset Platform</p>
             </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <Activity className="w-4 h-4 text-[#4ECDC4]" />
+              <span className="text-sm text-gray-300">
+                {ENVIRONMENT === 'production' ? 'Production Ready' : 'Development Mode'}
+              </span>
+            </div>
+            <div className="w-2 h-2 bg-[#4ECDC4] rounded-full animate-pulse"></div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-6 py-12 max-w-4xl">
-        {/* Upload Section */}
-        {processingStep === 'upload' && (
-          <section>
-            <div className="text-center mb-12 space-y-4">
-              <h2 className="text-4xl font-bold">
-                Transform Your Documents into
-                <span className="block bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] bg-clip-text text-transparent">
-                  AI-Ready Chunks
-                </span>
-              </h2>
-              <p className="text-gray-300 text-lg max-w-2xl mx-auto">
-                Upload any document and watch as Wolfstitch intelligently processes, cleans, and chunks your content for optimal AI consumption.
+      <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+        
+        {/* Hero Section */}
+        <section className="text-center space-y-4 py-8">
+          <h2 className="text-4xl font-bold text-white mb-2">
+            Transform Documents into 
+            <span className="bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] bg-clip-text text-transparent"> AI-Ready Datasets</span>
+          </h2>
+          <p className="text-gray-300 text-lg max-w-2xl mx-auto">
+            Professional-grade document processing with intelligent chunking, 40+ file formats, and beautiful export options
+          </p>
+          {ENVIRONMENT === 'development' && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mx-auto max-w-md">
+              <p className="text-yellow-300 text-sm">
+                🚧 Development Mode - API: {API_BASE_URL}
               </p>
             </div>
+          )}
+        </section>
 
-            {/* Upload Area */}
-            <div className="mb-8">
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                className="relative group"
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.txt,.md,.py,.js,.jsx,.ts,.tsx,.json,.csv,.html,.epub,.pptx"
-                />
-                
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-gray-600 rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 hover:border-[#4ECDC4] hover:bg-[rgba(78,205,196,0.05)] group-hover:shadow-lg group-hover:shadow-[rgba(78,205,196,0.1)]"
-                >
-                  <Upload className="w-16 h-16 mx-auto mb-4 text-gray-400 group-hover:text-[#4ECDC4] transition-colors" />
-                  <h3 className="text-xl font-semibold mb-2">
-                    Drop your files here
-                  </h3>
-                  <p className="text-gray-400 mb-4">
-                    or click to browse
+        {/* Upload Section */}
+        {processingStep === 'upload' && (
+          <section className="space-y-6">
+            <div 
+              className="relative border-2 border-dashed border-[#FF6B47] bg-[rgba(255,107,71,0.1)] hover:bg-[rgba(255,107,71,0.15)] rounded-2xl p-12 text-center transition-all duration-300 cursor-pointer shadow-lg shadow-[rgba(255,107,71,0.2)]"
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+                accept=".pdf,.docx,.txt,.md,.py,.js,.json,.csv,.pptx,.xlsx"
+              />
+              <div className="space-y-6">
+                <div className="mx-auto w-20 h-20 bg-gradient-to-br from-[#FF6B47] to-[#E85555] rounded-full flex items-center justify-center shadow-xl">
+                  <Upload className="w-10 h-10 text-white" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-white mb-2">
+                    Drop files here or click to browse
                   </p>
-                  <p className="text-sm text-gray-500">
-                    Supports PDF, DOCX, TXT, MD, Code files, and more (up to 100MB)
+                  <p className="text-gray-300">
+                    PDF, DOCX, TXT, code files, presentations, or entire folders
                   </p>
                 </div>
-              </div>
-            </div>
-
-            {/* Features Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-xl p-6 border border-gray-700 hover:border-[#FF6B47] transition-colors">
-                <div className="w-12 h-12 bg-[rgba(255,107,71,0.2)] rounded-lg flex items-center justify-center mb-4">
-                  <FileText className="w-6 h-6 text-[#FF6B47]" />
+                <div className="space-y-4">
+                  <button className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105">
+                    <Upload className="w-5 h-5 mr-2" />
+                    Choose Files
+                  </button>
+                  <p className="text-sm text-gray-400">
+                    or drag and drop your documents here
+                  </p>
                 </div>
-                <h4 className="font-semibold mb-2">Smart Parsing</h4>
-                <p className="text-sm text-gray-400">
-                  Advanced extraction for 40+ file formats with layout preservation
-                </p>
-              </div>
-              
-              <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-xl p-6 border border-gray-700 hover:border-[#4ECDC4] transition-colors">
-                <div className="w-12 h-12 bg-[rgba(78,205,196,0.2)] rounded-lg flex items-center justify-center mb-4">
-                  <Zap className="w-6 h-6 text-[#4ECDC4]" />
-                </div>
-                <h4 className="font-semibold mb-2">Intelligent Chunking</h4>
-                <p className="text-sm text-gray-400">
-                  Context-aware splitting optimized for AI token limits
-                </p>
-              </div>
-              
-              <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-xl p-6 border border-gray-700 hover:border-[#FF6B47] transition-colors">
-                <div className="w-12 h-12 bg-[rgba(255,107,71,0.2)] rounded-lg flex items-center justify-center mb-4">
-                  <Download className="w-6 h-6 text-[#FF6B47]" />
-                </div>
-                <h4 className="font-semibold mb-2">Ready to Use</h4>
-                <p className="text-sm text-gray-400">
-                  Export as JSONL with metadata for immediate AI integration
-                </p>
               </div>
             </div>
           </section>
@@ -517,7 +392,7 @@ const WolfstitchApp = () => {
           </section>
         )}
 
-        {/* Success Section */}
+        {/* Success Section - Fixed to handle new preview format */}
         {processingStep === 'completed' && processingResult && (
           <section className="space-y-6">
             <div className="text-center space-y-4">
@@ -537,7 +412,7 @@ const WolfstitchApp = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div className="text-center">
                   <div className="text-3xl font-bold text-[#FF6B47] mb-1">
-                    {processingResult.total_chunks || processingResult.chunks || 0}
+                    {processingResult.chunks || 0}
                   </div>
                   <div className="text-sm text-gray-300">Chunks Created</div>
                 </div>
@@ -555,95 +430,88 @@ const WolfstitchApp = () => {
                 </div>
               </div>
 
-              {/* Preview Section */}
+              {/* Preview - Fixed to handle new format */}
               {processingResult.preview && processingResult.preview.length > 0 && (
                 <div className="bg-gray-800/50 rounded-xl p-6 mb-8 border border-gray-600">
                   <h4 className="font-semibold text-white mb-4 flex items-center">
                     <Eye className="w-5 h-5 mr-2 text-[#4ECDC4]" />
-                    Preview (First {Math.min(3, processingResult.preview.length)} Chunks)
+                    Preview (First Chunks)
                   </h4>
                   <div className="space-y-4">
                     {processingResult.preview.slice(0, 3).map((chunk, index) => (
                       <div key={index} className="bg-gray-900 rounded-lg border border-gray-700 p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs text-gray-400">Chunk {index + 1}</span>
-                          <span className="text-xs text-[#4ECDC4]">
-                            {typeof chunk === 'string' 
-                              ? `~${Math.floor((processingResult.total_tokens || 0) / (processingResult.chunks || 1))} tokens`
-                              : `${chunk.tokens} tokens`}
-                          </span>
-                        </div>
                         <div className="font-mono text-sm text-gray-300 leading-relaxed">
                           {typeof chunk === 'string' ? chunk : chunk.text}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500 flex justify-between">
+                          <span>Chunk {index + 1}</span>
+                          {typeof chunk !== 'string' && chunk.tokens && (
+                            <span>{chunk.tokens} tokens</span>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
-                  {processingResult.preview.length > 3 && (
-                    <p className="text-center text-sm text-gray-400 mt-4">
-                      ... and {processingResult.preview.length - 3} more chunks
-                    </p>
-                  )}
                 </div>
               )}
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                {/* Download Full Results Button */}
-                <button
-                  onClick={downloadResults}
-                  disabled={isDownloading}
-                  className="inline-flex items-center justify-center px-6 py-3 bg-gradient-to-r from-[#4ECDC4] to-[#3FBAB2] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(78,205,196,0.3)] transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isDownloading ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                      Processing Full Export...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="w-5 h-5 mr-2" />
-                      Download Full Results
-                    </>
-                  )}
-                </button>
-
-                {/* Download Preview Button */}
-                <button
-                  onClick={downloadPreview}
-                  className="inline-flex items-center justify-center px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-semibold transition-all duration-300"
-                >
-                  <Eye className="w-5 h-5 mr-2" />
-                  Download Preview Only
-                </button>
-
-                {/* Process Another Button */}
                 <button
                   onClick={resetApp}
-                  className="inline-flex items-center justify-center px-6 py-3 bg-[rgba(255,255,255,0.1)] hover:bg-[rgba(255,255,255,0.15)] text-white rounded-xl font-semibold border border-gray-600 hover:border-gray-500 transition-all duration-300"
+                  className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105"
                 >
-                  <Upload className="w-5 h-5 mr-2" />
-                  Process Another File
+                  <Zap className="w-5 h-5 mr-2" />
+                  Process More Files
+                </button>
+                <button 
+                  onClick={downloadResults}
+                  className="inline-flex items-center px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+                >
+                  <Download className="w-5 h-5 mr-2" />
+                  Download Results
                 </button>
               </div>
+            </div>
+          </section>
+        )}
 
-              {/* Processing Info */}
-              {processingResult.processing_time && (
-                <div className="text-center text-sm text-gray-400 mt-4">
-                  Processed in {processingResult.processing_time.toFixed(2)} seconds
+        {/* File Details Section */}
+        {selectedFiles.length > 0 && processingStep !== 'upload' && (
+          <section className="space-y-4">
+            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-white flex items-center">
+                  <Folder className="w-5 h-5 mr-2 text-[#4ECDC4]" />
+                  Selected Files ({selectedFiles.length})
+                </h3>
+                <button 
+                  onClick={() => setShowFileDetails(!showFileDetails)}
+                  className="flex items-center px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-lg transition-all duration-200 text-sm"
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  {showFileDetails ? 'Hide' : 'Show'} Details
+                  <ChevronDown className={`w-4 h-4 ml-2 transition-transform duration-200 ${showFileDetails ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+              
+              {showFileDetails && (
+                <div className="space-y-2">
+                  {selectedFiles.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-600">
+                      <div className="flex items-center space-x-3">
+                        {getFileIcon(file.name)}
+                        <span className="font-medium text-white">{file.name}</span>
+                      </div>
+                      <span className="text-sm text-gray-400">{formatFileSize(file.size)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           </section>
         )}
-      </main>
-
-      {/* Footer */}
-      <footer className="mt-auto py-6 text-center text-sm text-gray-400">
-        <p>
-          {APP_NAME} Cloud • Intelligent Document Processing
-        </p>
-      </footer>
+      </div>
     </div>
   );
 };
