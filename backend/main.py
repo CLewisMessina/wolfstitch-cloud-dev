@@ -135,8 +135,7 @@ def get_cors_origins():
     if settings.ENVIRONMENT.lower() == "production":
         return [
             "https://www.wolfstitch.dev",
-            "https://wolfstitch.dev", 
-            "https://app.wolfstitch.dev"
+            "https://wolfstitch.dev"
         ]
     else:
         return [
@@ -163,7 +162,6 @@ def get_trusted_hosts():
         return base_hosts + [
             "api.wolfstitch.dev",
             "wolfstitch.dev",
-            "app.wolfstitch.dev",
             "www.wolfstitch.dev"
         ]
     else:
