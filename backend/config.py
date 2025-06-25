@@ -113,11 +113,15 @@ class Settings(BaseSettings):
     @classmethod
     def set_allowed_origins(cls, v, info):
         """Set CORS origins based on environment"""
+        # If v is provided and is a string (from env var), convert to list
         if v:
-            return v
+            if isinstance(v, str):
+                # Handle comma-separated string from environment variable
+                return [origin.strip() for origin in v.split(",") if origin.strip()]
+            elif isinstance(v, list):
+                return v
             
         environment = info.data.get("ENVIRONMENT", "development").lower()
-        frontend_url = info.data.get("FRONTEND_URL")
         
         base_origins = [
             "http://localhost:3000",
@@ -142,8 +146,13 @@ class Settings(BaseSettings):
     @classmethod
     def set_allowed_hosts(cls, v, info):
         """Set allowed hosts based on environment"""
+        # If v is provided and is a string (from env var), convert to list
         if v:
-            return v
+            if isinstance(v, str):
+                # Handle comma-separated string from environment variable
+                return [host.strip() for host in v.split(",") if host.strip()]
+            elif isinstance(v, list):
+                return v
             
         environment = info.data.get("ENVIRONMENT", "development").lower()
         
