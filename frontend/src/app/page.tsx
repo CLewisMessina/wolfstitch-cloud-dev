@@ -1,3 +1,4 @@
+// src\app\page.tsx
 'use client';
 
 import React, { useState, useRef } from 'react';
@@ -38,8 +39,15 @@ interface ProcessingResult {
   job_id?: string;
   enhanced?: boolean;
   processing_time?: number;
-  file_info?: any;
-  metadata?: any;
+  file_info?: {
+    filename?: string;
+    size?: number;
+    format?: string;
+    [key: string]: unknown;  // Allow additional properties
+  };
+  metadata?: {
+    [key: string]: unknown;  // Allow any metadata properties
+  };
 }
 
 type ProcessingStep = 'upload' | 'processing' | 'complete' | 'error';
