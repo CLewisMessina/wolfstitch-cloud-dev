@@ -2,6 +2,7 @@
 """
 Wolfstitch Cloud - Storage Service
 Manages file storage and provides secure download URLs
+Environment-aware URL generation for dev/prod domains
 """
 
 import os
@@ -29,7 +30,9 @@ class StorageService:
         """
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(exist_ok=True)
-        self.base_url = base_url or os.getenv("API_BASE_URL", "http://localhost:8000")
+        
+        # Environment-aware base URL detection
+        self.base_url = self._detect_base_url(base_url)
         
         # Create subdirectories
         self.exports_dir = self.storage_dir / "exports"
@@ -38,6 +41,53 @@ class StorageService:
         self.temp_dir.mkdir(exist_ok=True)
         
         logger.info(f"Storage service initialized at: {self.storage_dir}")
+        logger.info(f"Download base URL: {self.base_url}")
+    
+    def _detect_base_url(self, provided_url: str = "") -> str:
+        """
+        Intelligently detect the correct base URL for the current environment
+        
+        Priority order:
+        1. Explicitly provided base_url parameter
+        2. API_BASE_URL environment variable
+        3. Auto-detection based on environment settings
+        4. Railway-specific environment variables
+        5. Fallback to localhost for development
+        """
+        if provided_url:
+            return provided_url
+        
+        # Check explicit environment variable
+        api_base_url = os.getenv("API_BASE_URL")
+        if api_base_url:
+            return api_base_url
+        
+        # Detect environment from ENVIRONMENT variable
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        
+        # Production environment
+        if environment == "production":
+            return "https://api.wolfstitch.dev"
+        
+        # Development/staging environment
+        elif environment in ["development", "staging", "dev"]:
+            return "https://api-dev.wolfstitch.dev"
+        
+        # Check if we're on Railway (fallback detection)
+        railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+        if railway_domain:
+            return f"https://{railway_domain}"
+        
+        railway_url = os.getenv("RAILWAY_STATIC_URL")
+        if railway_url:
+            return railway_url
+        
+        # If we detect any Railway environment variables, assume development
+        if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
+            return "https://api-dev.wolfstitch.dev"
+        
+        # Local development fallback
+        return "http://localhost:8000"
     
     async def store_export_file(
         self,
@@ -68,7 +118,9 @@ class StorageService:
                 "original_filename": source_path.name,
                 "stored_at": datetime.utcnow().isoformat(),
                 "expires_at": (datetime.utcnow() + timedelta(hours=24)).isoformat(),
-                "size_bytes": source_path.stat().st_size
+                "size_bytes": source_path.stat().st_size,
+                "environment": os.getenv("ENVIRONMENT", "development"),
+                "base_url_used": self.base_url
             }
             
             # Copy file to storage location
@@ -83,9 +135,11 @@ class StorageService:
             metadata_path = self.exports_dir / f"{storage_id}.json"
             import json
             with open(metadata_path, 'w') as f:
-                json.dump(metadata, f)
+                json.dump(metadata, f, indent=2)
             
             logger.info(f"File stored successfully: {dest_filename}")
+            logger.info(f"Generated download URL: {download_url}")
+            logger.info(f"Environment: {metadata['environment']}, Base URL: {self.base_url}")
             
             return {
                 "storage_id": storage_id,
@@ -104,131 +158,138 @@ class StorageService:
         # URL-encode the filename to handle special characters
         encoded_filename = quote(filename)
         
-        # For development, use direct download endpoint
-        # In production, this would use signed URLs with S3 or similar
-        return f"{self.base_url}/api/v1/downloads/{storage_id}/{encoded_filename}"
+        # Generate the download URL
+        download_url = f"{self.base_url}/api/v1/downloads/{storage_id}/{encoded_filename}"
+        
+        return download_url
     
     async def get_file_path(self, storage_id: str) -> Optional[Path]:
         """Get file path for a storage ID"""
         # Check metadata exists
         metadata_path = self.exports_dir / f"{storage_id}.json"
         if not metadata_path.exists():
-            return None
-        
-        # Load metadata
-        import json
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
-        
-        # Check if expired
-        expires_at = datetime.fromisoformat(metadata["expires_at"])
-        if datetime.utcnow() > expires_at:
-            logger.warning(f"File expired: {storage_id}")
+            logger.warning(f"Metadata not found for storage_id: {storage_id}")
             return None
         
         # Find the actual file
         pattern = f"{storage_id}_*"
-        files = list(self.exports_dir.glob(pattern))
+        matching_files = list(self.exports_dir.glob(pattern))
         
-        if files:
-            return files[0]
+        if not matching_files:
+            logger.warning(f"No files found matching pattern: {pattern}")
+            return None
         
-        return None
+        # Return the first matching file (should be only one)
+        file_path = matching_files[0]
+        logger.debug(f"Found file for storage_id {storage_id}: {file_path}")
+        return file_path
     
-    async def validate_access(
-        self,
-        storage_id: str,
-        user_id: Optional[str] = None
-    ) -> bool:
-        """
-        Validate access to a stored file
-        
-        Args:
-            storage_id: Storage identifier
-            user_id: User requesting access
+    async def validate_access(self, storage_id: str, user_id: Optional[str] = None) -> bool:
+        """Validate access to a stored file"""
+        try:
+            # Check metadata exists
+            metadata_path = self.exports_dir / f"{storage_id}.json"
+            if not metadata_path.exists():
+                logger.warning(f"Metadata file not found: {metadata_path}")
+                return False
             
-        Returns:
-            True if access is allowed
-        """
-        # Load metadata
-        metadata_path = self.exports_dir / f"{storage_id}.json"
-        if not metadata_path.exists():
+            # Load and check metadata
+            import json
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+            
+            # Check expiration
+            expires_at = datetime.fromisoformat(metadata["expires_at"])
+            if datetime.utcnow() > expires_at:
+                logger.info(f"File expired: {storage_id} (expired at {expires_at})")
+                return False
+            
+            # Check if actual file exists
+            file_path = await self.get_file_path(storage_id)
+            if not file_path or not file_path.exists():
+                logger.warning(f"Storage file missing for: {storage_id}")
+                return False
+            
+            # Check user access (for future user-based access control)
+            # For now, allow all access if file exists and not expired
+            logger.debug(f"Access validated for storage_id: {storage_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating access for {storage_id}: {str(e)}")
             return False
-        
-        import json
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
-        
-        # Check expiration
-        expires_at = datetime.fromisoformat(metadata["expires_at"])
-        if datetime.utcnow() > expires_at:
-            return False
-        
-        # Check user access (if user_id is stored)
-        if metadata.get("user_id") and user_id:
-            return metadata["user_id"] == user_id
-        
-        # Allow access for files without user restrictions
-        return True
     
-    async def cleanup_expired_files(self):
-        """Clean up expired files from storage"""
+    async def cleanup_old_exports(self):
+        """Clean up expired export files"""
         try:
             current_time = datetime.utcnow()
             cleaned_count = 0
             
-            # Check all metadata files
-            for metadata_path in self.exports_dir.glob("*.json"):
+            for metadata_file in self.exports_dir.glob("*.json"):
                 try:
                     import json
-                    with open(metadata_path, 'r') as f:
+                    with open(metadata_file, 'r') as f:
                         metadata = json.load(f)
                     
-                    # Check if expired
                     expires_at = datetime.fromisoformat(metadata["expires_at"])
                     if current_time > expires_at:
+                        # Remove metadata file
+                        metadata_file.unlink()
+                        
+                        # Remove actual export file
                         storage_id = metadata["storage_id"]
-                        
-                        # Remove the actual file
-                        pattern = f"{storage_id}_*"
-                        for file_path in self.exports_dir.glob(pattern):
-                            file_path.unlink()
-                            logger.debug(f"Removed expired file: {file_path.name}")
-                        
-                        # Remove metadata
-                        metadata_path.unlink()
+                        for export_file in self.exports_dir.glob(f"{storage_id}_*"):
+                            export_file.unlink()
+                            logger.debug(f"Removed expired file: {export_file}")
+                            
                         cleaned_count += 1
+                        logger.info(f"Cleaned up expired file: {storage_id}")
                         
                 except Exception as e:
-                    logger.error(f"Error processing metadata file {metadata_path}: {e}")
+                    logger.error(f"Error cleaning up {metadata_file}: {e}")
             
             if cleaned_count > 0:
                 logger.info(f"Cleaned up {cleaned_count} expired files")
+            else:
+                logger.debug("No expired files to clean up")
                 
         except Exception as e:
-            logger.error(f"Error during cleanup: {str(e)}")
+            logger.error(f"Error in cleanup task: {e}")
     
     def get_storage_stats(self) -> Dict[str, Any]:
-        """Get storage statistics"""
-        total_size = 0
-        file_count = 0
-        
-        for file_path in self.exports_dir.glob("*"):
-            if file_path.suffix != ".json":
-                total_size += file_path.stat().st_size
-                file_count += 1
-        
-        return {
-            "total_files": file_count,
-            "total_size_bytes": total_size,
-            "total_size_readable": self._format_file_size(total_size),
-            "storage_path": str(self.storage_dir)
-        }
+        """Get storage statistics for monitoring"""
+        try:
+            total_files = len(list(self.exports_dir.glob("*.json")))
+            total_size = sum(f.stat().st_size for f in self.exports_dir.iterdir() if f.is_file())
+            
+            return {
+                "total_files": total_files,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "storage_dir": str(self.storage_dir),
+                "base_url": self.base_url,
+                "environment": os.getenv("ENVIRONMENT", "development")
+            }
+        except Exception as e:
+            logger.error(f"Error getting storage stats: {e}")
+            return {"error": str(e)}
+
+
+def _get_content_type(filename: str) -> str:
+    """Get content type based on file extension"""
+    extension = filename.lower().split('.')[-1]
     
-    def _format_file_size(self, size_bytes: int) -> str:
-        """Format file size in human-readable format"""
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if size_bytes < 1024.0:
-                return f"{size_bytes:.2f} {unit}"
-            size_bytes /= 1024.0
-        return f"{size_bytes:.2f} TB"
+    content_types = {
+        'jsonl': 'application/jsonlines',
+        'json': 'application/json',
+        'csv': 'text/csv',
+        'txt': 'text/plain',
+        'pdf': 'application/pdf',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'md': 'text/markdown',
+        'html': 'text/html',
+        'xml': 'application/xml'
+    }
+    
+    return content_types.get(extension, 'application/octet-stream')

@@ -1,11 +1,11 @@
-#backend\config.py
+# backend/config.py
 """
 Wolfstitch Cloud - Application Configuration
-Centralized configuration management using environment variables
+Environment-aware configuration management for dev/prod domains
 """
 
 from pydantic_settings import BaseSettings
-from pydantic import validator, field_validator
+from pydantic import field_validator
 from typing import List, Optional
 import os
 from pathlib import Path
@@ -22,6 +22,46 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     API_VERSION: str = "v1"
     LOG_LEVEL: str = "INFO"
+    
+    # =============================================================================
+    # DOMAIN CONFIGURATION - Environment-aware
+    # =============================================================================
+    API_BASE_URL: Optional[str] = None
+    FRONTEND_URL: Optional[str] = None
+    
+    @field_validator("API_BASE_URL", mode="before")
+    @classmethod
+    def set_api_base_url(cls, v, info):
+        """Set API base URL based on environment if not explicitly provided"""
+        if v:
+            return v
+        
+        environment = info.data.get("ENVIRONMENT", "development").lower()
+        
+        if environment == "production":
+            return "https://api.wolfstitch.dev"
+        elif environment in ["development", "staging", "dev"]:
+            return "https://api-dev.wolfstitch.dev"
+        else:
+            # Fallback for local development
+            return "http://localhost:8000"
+    
+    @field_validator("FRONTEND_URL", mode="before") 
+    @classmethod
+    def set_frontend_url(cls, v, info):
+        """Set frontend URL based on environment if not explicitly provided"""
+        if v:
+            return v
+            
+        environment = info.data.get("ENVIRONMENT", "development").lower()
+        
+        if environment == "production":
+            return "https://app.wolfstitch.dev"
+        elif environment in ["development", "staging", "dev"]:
+            return "https://dev.wolfstitch.dev"
+        else:
+            # Fallback for local development
+            return "http://localhost:3000"
     
     # =============================================================================
     # DATABASE CONFIGURATION  
@@ -45,123 +85,133 @@ class Settings(BaseSettings):
     # FILE STORAGE
     # =============================================================================
     UPLOAD_DIR: str = "./uploads"
+    STORAGE_DIR: str = "./storage"
+    EXPORT_DIR: str = "./exports"
     MAX_FILE_SIZE_MB: int = 100
+    FILE_RETENTION_HOURS: int = 24
+    
     ALLOWED_FILE_EXTENSIONS: List[str] = [
         # Documents
         "pdf", "docx", "txt", "epub", "html", "md", "rtf",
         # Spreadsheets  
-        "xlsx", "csv",
+        "xlsx", "csv", "xls",
         # Presentations
-        "pptx",
+        "pptx", "ppt",
         # Code files
-        "py", "js", "jsx", "ts", "tsx", "java", "cpp", "c", "h", 
-        "go", "rs", "rb", "php", "swift", "kt", "cs", "r", "scala",
-        # Config files
-        "json", "yaml", "yml", "toml", "ini", "xml"
+        "py", "js", "ts", "java", "cpp", "c", "cs", "php", "rb", "go", "rs",
+        # Data files
+        "json", "jsonl", "xml", "yaml", "yml"
     ]
     
-    # AWS S3 Configuration (for production)
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
-    AWS_BUCKET_NAME: Optional[str] = None
-    AWS_REGION: str = "us-east-1"
+    # =============================================================================
+    # CORS AND SECURITY - Environment-aware
+    # =============================================================================
+    ALLOWED_ORIGINS: Optional[List[str]] = None
+    ALLOWED_HOSTS: Optional[List[str]] = None
+    
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def set_allowed_origins(cls, v, info):
+        """Set CORS origins based on environment"""
+        if v:
+            return v
+            
+        environment = info.data.get("ENVIRONMENT", "development").lower()
+        frontend_url = info.data.get("FRONTEND_URL")
+        
+        base_origins = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
+        ]
+        
+        if environment == "production":
+            return base_origins + [
+                "https://wolfstitch.dev",
+                "https://www.wolfstitch.dev", 
+                "https://app.wolfstitch.dev"
+            ]
+        else:
+            return base_origins + [
+                "https://wolfstitch.dev",
+                "https://www.wolfstitch.dev",
+                "https://dev.wolfstitch.dev",
+                "https://api-dev.wolfstitch.dev"
+            ]
+    
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
+    def set_allowed_hosts(cls, v, info):
+        """Set allowed hosts based on environment"""
+        if v:
+            return v
+            
+        environment = info.data.get("ENVIRONMENT", "development").lower()
+        
+        # Base hosts that are always allowed
+        base_hosts = [
+            "*.railway.app", 
+            "*.up.railway.app",
+            "localhost",
+            "127.0.0.1"
+        ]
+        
+        if environment == "production":
+            return base_hosts + [
+                "api.wolfstitch.dev",
+                "wolfstitch.dev",
+                "app.wolfstitch.dev",
+                "www.wolfstitch.dev"
+            ]
+        else:
+            return base_hosts + [
+                "api-dev.wolfstitch.dev",
+                "dev.wolfstitch.dev",
+                "wolfstitch.dev",
+                "www.wolfstitch.dev"
+            ]
     
     # =============================================================================
-    # EXTERNAL SERVICES
+    # PROCESSING CONFIGURATION
     # =============================================================================
-    # Stripe
-    STRIPE_PUBLISHABLE_KEY: Optional[str] = None
-    STRIPE_SECRET_KEY: Optional[str] = None
-    STRIPE_WEBHOOK_SECRET: Optional[str] = None
-    
-    # Clerk
-    CLERK_SECRET_KEY: Optional[str] = None
-    CLERK_PUBLISHABLE_KEY: Optional[str] = None
-    
-    # Email
-    EMAIL_SERVICE_API_KEY: Optional[str] = None
-    FROM_EMAIL: str = "noreply@wolfstitch.com"
-    
-    # HuggingFace (for premium tokenizers)
-    HUGGINGFACE_API_KEY: Optional[str] = None
-    
-    # OpenAI (for tiktoken validation)
-    OPENAI_API_KEY: Optional[str] = None
-    
-    # Sentry (error tracking)
-    SENTRY_DSN: Optional[str] = None
+    MAX_CONCURRENT_JOBS: int = 10
+    JOB_TIMEOUT_SECONDS: int = 300  # 5 minutes
+    CHUNK_SIZE_LIMIT: int = 8192  # 8KB per chunk
+    MAX_CHUNKS_PER_FILE: int = 10000
     
     # =============================================================================
-    # BACKGROUND JOB SETTINGS
+    # RATE LIMITING
     # =============================================================================
-    RQ_DEFAULT_TIMEOUT: int = 300  # 5 minutes
-    RQ_RESULT_TTL: int = 3600      # 1 hour
-    MAX_CONCURRENT_JOBS: int = 5
-    
-    # =============================================================================
-    # API RATE LIMITING
-    # =============================================================================
-    FREE_TIER_REQUESTS_PER_HOUR: int = 100
-    PRO_TIER_REQUESTS_PER_HOUR: int = 1000
-    ENTERPRISE_TIER_REQUESTS_PER_HOUR: int = 10000
+    RATE_LIMIT_REQUESTS: int = 100
+    RATE_LIMIT_PERIOD: int = 3600  # 1 hour
+    ANONYMOUS_RATE_LIMIT: int = 10
     
     # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
-    ENABLE_PREMIUM_FEATURES: bool = True
-    ENABLE_COST_ANALYSIS: bool = True
     ENABLE_ANALYTICS: bool = True
-    DESKTOP_SESSION_COMPATIBILITY: bool = True
-    LEGACY_EXPORT_FORMATS: bool = True
+    ENABLE_COST_ANALYSIS: bool = True
+    ENABLE_PREMIUM_FEATURES: bool = True
+    ENABLE_USER_UPLOADS: bool = True
+    ENABLE_BACKGROUND_JOBS: bool = True
     
     # =============================================================================
-    # CORS AND SECURITY
+    # MONITORING AND LOGGING
     # =============================================================================
-    FRONTEND_URL: str = "http://localhost:3000"
-    ALLOWED_ORIGINS: Optional[List[str]] = None
-    ALLOWED_HOSTS: Optional[List[str]] = None
-
-    @field_validator("ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def set_allowed_origins(cls, v, info):
-        frontend_url = info.data.get("FRONTEND_URL", "http://localhost:3000")
-        return [
-            frontend_url,
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "https://wolfstitch.dev",
-            "https://app.wolfstitch.dev"
-        ]
-
-    @field_validator("ALLOWED_HOSTS", mode="before")
-    @classmethod
-    def set_allowed_hosts(cls, v, info):
-        if info.data.get("ENVIRONMENT") == "production":
-            return [
-                "api.wolfstitch.dev",
-                "wolfstitch.dev",
-                "app.wolfstitch.dev"
-            ]
-        return ["*"]
-    
-    # =============================================================================
-    # DEPLOYMENT SETTINGS
-    # =============================================================================
-    DOMAIN: Optional[str] = None
     HEALTH_CHECK_PATH: str = "/health"
+    METRICS_ENABLED: bool = True
     
     # =============================================================================
-    # DEVELOPMENT SETTINGS
+    # VALIDATION AND COMPUTED PROPERTIES
     # =============================================================================
-    TEST_FILES_DIR: str = "./test-files"
-    
-    @validator("UPLOAD_DIR", pre=True, always=True)
-    def create_upload_dir(cls, v):
-        """Ensure upload directory exists"""
-        Path(v).mkdir(exist_ok=True)
+    @field_validator("UPLOAD_DIR", "STORAGE_DIR", "EXPORT_DIR", mode="before")
+    @classmethod
+    def create_directories(cls, v):
+        """Ensure directories exist"""
+        Path(v).mkdir(parents=True, exist_ok=True)
         return v
     
-    @validator("MAX_FILE_SIZE_MB")
+    @field_validator("MAX_FILE_SIZE_MB")
+    @classmethod
     def validate_file_size(cls, v):
         """Validate file size limit"""
         if v <= 0 or v > 1000:  # Max 1GB
@@ -174,6 +224,21 @@ class Settings(BaseSettings):
         return self.MAX_FILE_SIZE_MB * 1024 * 1024
     
     @property
+    def is_production(self) -> bool:
+        """Check if running in production"""
+        return self.ENVIRONMENT.lower() == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development"""
+        return self.ENVIRONMENT.lower() in ["development", "dev"]
+    
+    @property
+    def is_staging(self) -> bool:
+        """Check if running in staging"""
+        return self.ENVIRONMENT.lower() == "staging"
+    
+    @property
     def database_url_async(self) -> str:
         """Get async database URL for SQLAlchemy"""
         if self.DATABASE_URL.startswith("sqlite"):
@@ -182,50 +247,91 @@ class Settings(BaseSettings):
             return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
         return self.DATABASE_URL
     
-    @property
-    def is_production(self) -> bool:
-        """Check if running in production"""
-        return self.ENVIRONMENT.lower() == "production"
-    
-    @property
-    def is_development(self) -> bool:
-        """Check if running in development"""
-        return self.ENVIRONMENT.lower() == "development"
-    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        case_sensitive = False
 
 
 # Global settings instance
 settings = Settings()
 
-# Logging configuration
-LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "default": {
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+
+# Logging configuration based on environment
+def get_logging_config():
+    """Get logging configuration based on environment"""
+    base_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            },
+            "detailed": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(module)s - %(funcName)s - %(message)s",
+            },
+            "json": {
+                "format": "%(asctime)s %(name)s %(levelname)s %(message)s",
+                "class": "pythonjsonlogger.jsonlogger.JsonFormatter"
+            }
         },
-        "detailed": {
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(module)s - %(funcName)s - %(message)s",
+        "handlers": {
+            "console": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",
+            }
         },
-    },
-    "handlers": {
-        "default": {
-            "formatter": "default",
-            "class": "logging.StreamHandler",
-            "stream": "ext://sys.stdout",
+        "root": {
+            "level": settings.LOG_LEVEL,
+            "handlers": ["console"],
         },
-        "file": {
+        "loggers": {
+            "wolfstitch": {
+                "level": settings.LOG_LEVEL,
+                "handlers": ["console"],
+                "propagate": False,
+            },
+            "uvicorn": {
+                "level": "INFO",
+                "handlers": ["console"],
+                "propagate": False,
+            },
+            "fastapi": {
+                "level": "INFO", 
+                "handlers": ["console"],
+                "propagate": False,
+            }
+        }
+    }
+    
+    # Add file handler in production
+    if settings.is_production:
+        base_config["handlers"]["file"] = {
             "formatter": "detailed",
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": "wolfstitch.log",
-        },
-    },
-    "root": {
-        "level": settings.LOG_LEVEL,
-        "handlers": ["default"] + (["file"] if settings.is_production else []),
-    },
-}
+            "maxBytes": 10485760,  # 10MB
+            "backupCount": 5
+        }
+        base_config["root"]["handlers"].append("file")
+        base_config["loggers"]["wolfstitch"]["handlers"].append("file")
+    
+    return base_config
+
+
+# Environment-specific configurations
+def get_environment_config():
+    """Get environment-specific configuration summary"""
+    return {
+        "environment": settings.ENVIRONMENT,
+        "is_production": settings.is_production,
+        "is_development": settings.is_development,
+        "is_staging": settings.is_staging,
+        "api_base_url": settings.API_BASE_URL,
+        "frontend_url": settings.FRONTEND_URL,
+        "allowed_origins": settings.ALLOWED_ORIGINS,
+        "allowed_hosts": settings.ALLOWED_HOSTS[:3] if settings.ALLOWED_HOSTS else [],  # First 3 for logs
+        "debug": settings.DEBUG,
+        "log_level": settings.LOG_LEVEL
+    }
