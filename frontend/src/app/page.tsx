@@ -1,4 +1,4 @@
-// src\app\page.tsx
+//  src\app\page.tsx
 'use client';
 
 import React, { useState, useRef } from 'react';
@@ -14,8 +14,7 @@ import {
   ChevronDown,
   Zap,
   Activity,
-  AlertCircle,
-  Loader2
+  AlertCircle
 } from 'lucide-react';
 
 // Fixed Types for API responses - matching actual API response structure
