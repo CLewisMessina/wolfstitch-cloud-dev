@@ -11,6 +11,7 @@ import logging
 import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form, Depends
 from fastapi.responses import JSONResponse
@@ -24,6 +25,7 @@ from backend.models.schemas import (
 from backend.dependencies import get_current_user, get_rate_limiter
 from backend.services.export_service import ExportService
 from backend.services.storage_service import StorageService
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
