@@ -1,4 +1,4 @@
-# backend/services/export_service.py
+# backend\services\export_service.py
 """
 Wolfstitch Cloud - Export Service
 Generates complete export files in various formats (JSONL, JSON, CSV)
@@ -111,10 +111,12 @@ class ExportService:
                     "chunk_id": chunk.get("chunk_id"),
                     "text": chunk.get("text"),  # FULL TEXT - NO TRUNCATION
                     "tokens": chunk.get("tokens"),
-                    "start_pos": chunk.get("start_pos"),
-                    "end_pos": chunk.get("end_pos"),
+                    "start_pos": chunk.get("start_pos"),  # Safe access - may be None
+                    "end_pos": chunk.get("end_pos"),      # Safe access - may be None
                     "metadata": chunk.get("metadata", {})
                 }
+                # Remove None values for cleaner output
+                chunk_data = {k: v for k, v in chunk_data.items() if v is not None}
                 f.write(json.dumps(chunk_data, ensure_ascii=False) + '\n')
     
     async def _generate_json(self, file_path: Path, processing_result: Dict[str, Any]):
@@ -137,8 +139,8 @@ class ExportService:
                 "chunk_id": chunk.get("chunk_id"),
                 "text": chunk.get("text"),  # FULL TEXT - NO TRUNCATION
                 "tokens": chunk.get("tokens"),
-                "start_pos": chunk.get("start_pos"),
-                "end_pos": chunk.get("end_pos"),
+                "start_pos": chunk.get("start_pos"),  # Safe access - may be None
+                "end_pos": chunk.get("end_pos"),      # Safe access - may be None
                 "metadata": chunk.get("metadata", {})
             })
         
@@ -169,8 +171,8 @@ class ExportService:
                     chunk.get("chunk_id"),
                     chunk.get("text"),  # FULL TEXT - NO TRUNCATION
                     chunk.get("tokens"),
-                    chunk.get("start_pos", ""),
-                    chunk.get("end_pos", ""),
+                    chunk.get("start_pos", ""),  # Empty string if None
+                    chunk.get("end_pos", ""),    # Empty string if None
                     chunk.get("metadata", {}).get("chunk_method", ""),
                     chunk.get("metadata", {}).get("tokenizer", ""),
                     processing_result.get("filename", "")

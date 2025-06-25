@@ -1,4 +1,4 @@
-# backend/api/processing.py
+# backend\api\processing.py
 """
 Wolfstitch Cloud - Processing API
 Enhanced with full processing capabilities for complete file exports
@@ -270,11 +270,12 @@ async def _process_file_background(
                     "chunk_id": idx + 1,
                     "text": chunk.text,  # FULL TEXT - NO TRUNCATION
                     "tokens": chunk.token_count,
-                    "start_pos": chunk.start_pos,
-                    "end_pos": chunk.end_pos,
+                    "start_pos": getattr(chunk, 'start_pos', None),  # Safe attribute access
+                    "end_pos": getattr(chunk, 'end_pos', None),      # Safe attribute access
                     "metadata": {
                         "chunk_method": config.chunk_method,
-                        "tokenizer": config.tokenizer
+                        "tokenizer": config.tokenizer,
+                        "chunk_index": getattr(chunk, 'chunk_index', idx)  # Use chunk_index if available
                     }
                 }
                 for idx, chunk in enumerate(result.chunks)  # ALL CHUNKS - NO LIMIT
