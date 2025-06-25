@@ -20,20 +20,26 @@ import {
 // Fixed Types for API responses - matching actual API response structure
 interface ChunkPreview {
   text: string;
-  tokens: number;
+  tokens?: number;
+  token_count?: number;  // API returns token_count
+  chunk_index?: number;
 }
 
 interface ProcessingResult {
-  message: string;
+  message?: string;
   filename: string;
-  chunks?: number;
+  chunks?: ChunkPreview[];  // API returns chunks array
+  preview?: ChunkPreview[];  // For backward compatibility
   total_chunks?: number;
   total_tokens?: number;
   average_chunk_size?: number;
-  preview?: ChunkPreview[];  // Fixed: Changed from string[] to ChunkPreview[]
   error?: string;
   status?: string;
   job_id?: string;
+  enhanced?: boolean;
+  processing_time?: number;
+  file_info?: any;
+  metadata?: any;
 }
 
 type ProcessingStep = 'upload' | 'processing' | 'complete' | 'error';
@@ -247,14 +253,14 @@ export default function FileProcessor() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-[#0D1117] to-gray-900 text-white">
-      <div className="max-w-6xl mx-auto p-6">
+    <div className="min-h-screen bg-gradient-to-b from-gray-900 via-blue-900 to-gray-900">
+      <div className="max-w-5xl mx-auto px-4 py-12">
         {/* Header */}
-        <header className="mb-10 text-center">
+        <header className="text-center mb-12">
           <div className="flex items-center justify-center mb-4">
-            <Activity className="w-10 h-10 text-[#4ECDC4] mr-3" />
-            <h1 className="text-5xl font-bold">
-              Wolf<span className="text-[#FF6B47]">stitch</span>
+            <Activity className="w-8 h-8 text-teal-400 mr-2" />
+            <h1 className="text-4xl font-bold text-white">
+              Wolf<span className="text-orange-500">stitch</span>
             </h1>
           </div>
           <p className="text-gray-300 text-lg">
@@ -262,69 +268,75 @@ export default function FileProcessor() {
           </p>
         </header>
 
-        {/* Upload Section */}
-        {processingStep === 'upload' && (
-          <section className="mb-10">
-            <div
-              className="border-2 border-dashed border-gray-600 rounded-2xl p-16 text-center cursor-pointer hover:border-[#4ECDC4] transition-colors bg-[rgba(255,255,255,0.05)] backdrop-blur-sm shadow-xl hover:shadow-[rgba(78,205,196,0.2)]"
-              onClick={() => fileInputRef.current?.click()}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-                accept=".pdf,.docx,.txt,.md,.py,.js,.json,.csv,.pptx,.xlsx"
-              />
-              <div className="space-y-6">
-                <div className="mx-auto w-20 h-20 bg-gradient-to-br from-[#FF6B47] to-[#E85555] rounded-full flex items-center justify-center shadow-xl">
-                  <Upload className="w-10 h-10 text-white" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-white mb-2">
-                    Drop files here or click to browse
-                  </p>
-                  <p className="text-gray-300">
-                    PDF, DOCX, TXT, code files, presentations, or entire folders
-                  </p>
-                </div>
+        {/* Main content area */}
+        <div className="bg-gray-800/50 backdrop-blur rounded-2xl p-8">
+          {/* Upload Section */}
+          {processingStep === 'upload' && (
+            <div>
+              <h2 className="text-3xl font-bold text-center mb-2 text-white">
+                Transform Documents into <span className="text-orange-500">AI-Ready</span> Datasets
+              </h2>
+              <p className="text-center text-gray-400 mb-8">
+                Professional-grade document processing with intelligent chunking, 40+ file formats, and beautiful export options
+              </p>
+              
+              <div
+                className="border-2 border-dashed border-orange-500/50 rounded-xl p-12 text-center cursor-pointer hover:border-orange-500 transition-colors bg-gray-700/30"
+                onClick={() => fileInputRef.current?.click()}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  accept=".pdf,.docx,.txt,.md,.py,.js,.json,.csv,.pptx,.xlsx"
+                />
                 <div className="space-y-4">
-                  <button className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105">
-                    <Upload className="w-5 h-5 mr-2" />
+                  <div className="mx-auto w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center">
+                    <Upload className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-semibold text-white mb-1">
+                      Drop files here or click to browse
+                    </p>
+                    <p className="text-gray-400 text-sm">
+                      PDF, DOCX, TXT, code files, presentations, or entire folders
+                    </p>
+                  </div>
+                  <button className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors inline-flex items-center">
+                    <Upload className="w-4 h-4 mr-2" />
                     Choose Files
                   </button>
-                  <p className="text-sm text-gray-400">
-                    Supports 40+ formats • Up to 100MB per file
+                  <p className="text-xs text-gray-500">
+                    or drag and drop your documents here
                   </p>
                 </div>
               </div>
             </div>
-          </section>
-        )}
+          )}
 
-        {/* Processing Section */}
-        {processingStep === 'processing' && (
-          <section className="mb-10">
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-8">
-              <div className="space-y-4">
-                <div className="flex items-center space-x-3">
-                  <Loader2 className="w-6 h-6 text-indigo-600 animate-spin" />
-                  <p className="text-lg font-medium text-gray-900">
-                    Processing your file...
-                  </p>
-                </div>
-                
-                <div className="w-full bg-gray-200 rounded-full h-2.5">
+          {/* Processing Section */}
+          {processingStep === 'processing' && (
+            <div className="text-center py-12">
+              <div className="inline-flex items-center space-x-3 mb-6">
+                <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+                <p className="text-xl font-medium text-white">
+                  Processing your file...
+                </p>
+              </div>
+              
+              <div className="max-w-md mx-auto">
+                <div className="w-full bg-gray-700 rounded-full h-3">
                   <div 
-                    className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300"
+                    className="bg-orange-500 h-3 rounded-full transition-all duration-300"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
                 
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-gray-400 mt-3">
                   {progress < 20 && "Uploading file..."}
                   {progress >= 20 && progress < 70 && "Processing chunks..."}
                   {progress >= 70 && progress < 90 && "Generating export..."}
@@ -332,18 +344,16 @@ export default function FileProcessor() {
                 </p>
               </div>
             </div>
-          </section>
-        )}
+          )}
 
-        {/* Error Section */}
-        {processingStep === 'error' && (
-          <section className="mb-10">
-            <div className="bg-red-50 border border-red-300 rounded-2xl p-8">
+          {/* Error Section */}
+          {processingStep === 'error' && (
+            <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-6">
               <div className="flex items-start space-x-3">
-                <AlertCircle className="w-6 h-6 text-red-600 mt-0.5" />
+                <AlertCircle className="w-6 h-6 text-red-500 mt-0.5" />
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-red-900">Processing Failed</h3>
-                  <p className="text-red-700 mt-1">{error}</p>
+                  <h3 className="text-lg font-semibold text-red-400">Processing Failed</h3>
+                  <p className="text-red-300 mt-1">{error}</p>
                   <button
                     onClick={resetApp}
                     className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
@@ -353,64 +363,60 @@ export default function FileProcessor() {
                 </div>
               </div>
             </div>
-          </section>
-        )}
+          )}
 
-        {/* Results Section */}
-        {processingStep === 'complete' && processingResult && (
-          <section className="mb-10">
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-8">
-              <div className="flex items-start justify-between mb-6">
+          {/* Results Section */}
+          {processingStep === 'complete' && processingResult && (
+            <div>
+              <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center">
-                  <CheckCircle className="w-8 h-8 text-[#4ECDC4] mr-3" />
+                  <CheckCircle className="w-8 h-8 text-teal-400 mr-3" />
                   <h2 className="text-2xl font-bold text-white">Processing Complete</h2>
                 </div>
-                <span className="px-3 py-1 bg-[#4ECDC4] text-gray-900 rounded-full text-sm font-medium">
+                <span className="px-3 py-1 bg-teal-500 text-white rounded-full text-sm font-medium">
                   Success
                 </span>
               </div>
 
               {/* Results Summary */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-gray-800 rounded-xl p-4">
+                <div className="bg-gray-700/50 rounded-lg p-4">
                   <p className="text-gray-400 text-sm">Total Chunks</p>
                   <p className="text-2xl font-bold text-white">
-                    {processingResult.chunks || processingResult.total_chunks || 0}
+                    {processingResult.total_chunks || 0}
                   </p>
                 </div>
-                <div className="bg-gray-800 rounded-xl p-4">
+                <div className="bg-gray-700/50 rounded-lg p-4">
                   <p className="text-gray-400 text-sm">Total Tokens</p>
                   <p className="text-2xl font-bold text-white">
                     {processingResult.total_tokens || 0}
                   </p>
                 </div>
-                <div className="bg-gray-800 rounded-xl p-4">
+                <div className="bg-gray-700/50 rounded-lg p-4">
                   <p className="text-gray-400 text-sm">Avg Chunk Size</p>
                   <p className="text-2xl font-bold text-white">
-                    {processingResult.average_chunk_size || 
-                     (processingResult.total_tokens && processingResult.chunks 
-                       ? Math.round(processingResult.total_tokens / processingResult.chunks)
-                       : 0)
+                    {processingResult.total_tokens && processingResult.total_chunks 
+                      ? Math.round(processingResult.total_tokens / processingResult.total_chunks)
+                      : 0
                     }
                   </p>
                 </div>
               </div>
 
               {/* Preview Section */}
-              {processingResult.preview && processingResult.preview.length > 0 && (
+              {((processingResult.chunks && processingResult.chunks.length > 0) || 
+                (processingResult.preview && processingResult.preview.length > 0)) && (
                 <div className="mb-6">
                   <h3 className="text-lg font-semibold text-white mb-3">Preview</h3>
                   <div className="space-y-3">
-                    {processingResult.preview.map((chunk, index) => (
-                      <div key={index} className="bg-gray-800 rounded-lg p-4">
+                    {(processingResult.chunks || processingResult.preview || []).map((chunk, index) => (
+                      <div key={index} className="bg-gray-700/50 rounded-lg p-4">
                         <div className="text-gray-300 text-sm line-clamp-3">
-                          {typeof chunk === 'string' ? chunk : chunk.text}
+                          {chunk.text}
                         </div>
                         <div className="mt-2 text-xs text-gray-500 flex justify-between">
-                          <span>Chunk {index + 1}</span>
-                          {typeof chunk !== 'string' && chunk.tokens && (
-                            <span>{chunk.tokens} tokens</span>
-                          )}
+                          <span>Chunk {chunk.chunk_index !== undefined ? chunk.chunk_index + 1 : index + 1}</span>
+                          <span>{chunk.token_count || chunk.tokens || 0} tokens</span>
                         </div>
                       </div>
                     ))}
@@ -422,63 +428,61 @@ export default function FileProcessor() {
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <button
                   onClick={resetApp}
-                  className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105"
+                  className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold transition-colors inline-flex items-center justify-center"
                 >
                   <Zap className="w-5 h-5 mr-2" />
                   Process More Files
                 </button>
                 <button 
                   onClick={downloadResults}
-                  className="inline-flex items-center px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+                  className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors inline-flex items-center justify-center"
                 >
                   <Download className="w-5 h-5 mr-2" />
                   Download Results
                 </button>
               </div>
             </div>
-          </section>
-        )}
+          )}
+        </div>
 
         {/* File Details Section */}
         {selectedFiles.length > 0 && processingStep !== 'upload' && (
-          <section className="space-y-4">
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-white flex items-center">
-                  <Folder className="w-5 h-5 mr-2 text-[#4ECDC4]" />
-                  Selected Files ({selectedFiles.length})
-                </h3>
-                <button 
-                  onClick={() => setShowFileDetails(!showFileDetails)}
-                  className="flex items-center px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-lg transition-all duration-200 text-sm"
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  {showFileDetails ? 'Hide' : 'Show'} Details
-                  <ChevronDown className={`w-4 h-4 ml-2 transition-transform duration-200 ${showFileDetails ? 'rotate-180' : ''}`} />
-                </button>
-              </div>
-              
-              {showFileDetails && (
-                <div className="space-y-3">
-                  {selectedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center space-x-3 p-3 bg-gray-800 rounded-lg">
-                      <div className="flex-shrink-0 text-[#4ECDC4]">
-                        {getFileIcon(file.name)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{file.name}</p>
-                        <p className="text-xs text-gray-400">{formatFileSize(file.size)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+          <div className="mt-6 bg-gray-800/50 backdrop-blur rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white flex items-center">
+                <Folder className="w-5 h-5 mr-2 text-teal-400" />
+                Selected Files ({selectedFiles.length})
+              </h3>
+              <button 
+                onClick={() => setShowFileDetails(!showFileDetails)}
+                className="flex items-center px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-lg transition-all duration-200 text-sm"
+              >
+                <Eye className="w-4 h-4 mr-1.5" />
+                {showFileDetails ? 'Hide' : 'Show'} Details
+                <ChevronDown className={`w-4 h-4 ml-1.5 transition-transform duration-200 ${showFileDetails ? 'rotate-180' : ''}`} />
+              </button>
             </div>
-          </section>
+            
+            {showFileDetails && (
+              <div className="space-y-2">
+                {selectedFiles.map((file, index) => (
+                  <div key={index} className="flex items-center space-x-3 p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex-shrink-0 text-teal-400">
+                      {getFileIcon(file.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{file.name}</p>
+                      <p className="text-xs text-gray-400">{formatFileSize(file.size)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Footer */}
-        <footer className="mt-16 text-center text-gray-400 text-sm">
+        <footer className="mt-12 text-center text-gray-500 text-sm">
           <p>Wolfstitch Cloud • Transform Data with Confidence</p>
         </footer>
       </div>
