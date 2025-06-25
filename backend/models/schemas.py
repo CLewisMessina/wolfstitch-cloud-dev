@@ -1,3 +1,4 @@
+# backend/models/schemas.py
 """
 Wolfstitch Cloud - Pydantic Schemas
 Request and response models for API endpoints
@@ -95,13 +96,17 @@ class FileInfo(BaseModel):
 
 class ProcessingConfig(BaseModel):
     """Configuration for text processing"""
-    tokenizer: TokenizerType = TokenizerType.WORD_ESTIMATE
+    tokenizer: str = Field(default="gpt-4", description="Tokenizer to use")
     max_tokens: int = Field(default=1024, ge=100, le=8192)
     overlap_tokens: int = Field(default=50, ge=0, le=500)
-    chunking_method: str = Field(default="paragraph", pattern="^(paragraph|sentence|custom)$")
+    chunk_method: str = Field(default="paragraph", description="Chunking method")
+    chunking_method: Optional[str] = Field(default=None, pattern="^(paragraph|sentence|custom)$")
     custom_delimiter: Optional[str] = None
+    preserve_structure: bool = Field(default=True, description="Preserve document structure")
     preserve_formatting: bool = True
     remove_headers_footers: bool = True
+    remove_headers: bool = Field(default=True, description="Remove headers/footers")
+    normalize_whitespace: bool = Field(default=True, description="Normalize whitespace")
     min_chunk_size: int = Field(default=50, ge=10, le=1000)
     
     @validator('custom_delimiter')
@@ -132,25 +137,18 @@ class ChunkData(BaseModel):
 
 class ProcessingResult(BaseModel):
     """Complete processing result"""
-    job_id: str
-    file_id: str
     filename: str
-    status: ProcessingStatus
-    chunks: List[ChunkData]
     total_chunks: int
     total_tokens: int
-    avg_tokens_per_chunk: float
+    total_characters: int
     processing_time: float
-    config: ProcessingConfig
-    export_format: ExportFormat
-    download_url: Optional[str] = None
-    created_at: datetime
-    completed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
+    chunks: List[Dict[str, Any]]
+    file_info: Dict[str, Any]
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ProcessingStatus(BaseModel):
-    """Processing job status"""
+class ProcessingStatusDetail(BaseModel):
+    """Processing job status detail"""
     job_id: str
     status: ProcessingStatus
     progress: float = Field(ge=0.0, le=100.0)
@@ -161,6 +159,24 @@ class ProcessingStatus(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class JobStatusResponse(BaseModel):
+    """Response for job status queries"""
+    job_id: str
+    status: ProcessingStatus
+    progress: float = Field(ge=0, le=100, description="Progress percentage")
+    filename: str
+    created_at: str
+    export_format: str
+    
+    # Optional fields based on status
+    error: Optional[str] = None
+    completed_at: Optional[str] = None
+    failed_at: Optional[str] = None
+    download_url: Optional[str] = None
+    total_chunks: Optional[int] = None
+    total_tokens: Optional[int] = None
 
 
 # =============================================================================
@@ -308,6 +324,27 @@ class ExportResponse(BaseModel):
     expires_at: datetime
     size_bytes: int
     created_at: datetime
+
+
+class ExportInfo(BaseModel):
+    """Information about generated export file"""
+    filename: str
+    file_path: str
+    format: str
+    size_bytes: int
+    size_readable: str
+    created_at: str
+    chunks_count: int
+    tokens_count: int
+
+
+class StorageInfo(BaseModel):
+    """Information about stored file"""
+    storage_id: str
+    download_url: str
+    filename: str
+    size_bytes: int
+    expires_at: str
 
 
 # =============================================================================

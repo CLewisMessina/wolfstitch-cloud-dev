@@ -1,123 +1,108 @@
+# backend/api/processing.py
 """
-Wolfstitch Cloud - Processing API Routes
-Clean final version with proper variable definitions
+Wolfstitch Cloud - Processing API
+Enhanced with full processing capabilities for complete file exports
 """
 
-import asyncio
-import logging
-import tempfile
 import os
-from typing import List, Dict, Any, Optional
-from pathlib import Path
+import uuid
+import tempfile
+import logging
+import asyncio
+from typing import Optional, Dict, Any
+from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form, Depends
+from fastapi.responses import JSONResponse
 
+from backend.models.schemas import (
+    ProcessingConfig,
+    ProcessingStatus,
+    JobStatusResponse,
+    ProcessingResult
+)
 from backend.dependencies import get_current_user, get_rate_limiter
-
-# Import enhanced wolfcore modules
-try:
-    from wolfcore import Wolfstitch, ProcessingConfig as WolfcoreProcessingConfig
-    from wolfcore.exceptions import ProcessingError, ParsingError
-    from wolfcore.cleaner import clean_text_async
-    from wolfcore.chunker import chunk_text_async, ChunkingConfig
-    ENHANCED_MODULES_AVAILABLE = True
-    logging.info("Enhanced wolfcore modules loaded successfully")
-except ImportError as e:
-    logging.warning(f"Enhanced modules not available: {e}")
-    ENHANCED_MODULES_AVAILABLE = False
-
-# Global availability flags
-AUTH_AVAILABLE = True
-RATE_LIMITER_AVAILABLE = True
-SCHEMAS_AVAILABLE = True
+from backend.services.export_service import ExportService
+from backend.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
+
+# Initialize services
+export_service = ExportService()
+storage_service = StorageService()
+
 router = APIRouter()
 
-# =============================================================================
-# SYSTEM ENDPOINTS (No Auth Required)
-# =============================================================================
+# Import wolfcore if available
+try:
+    from wolfcore import Wolfstitch
+    WOLFCORE_AVAILABLE = True
+except ImportError:
+    logger.warning("Wolfcore not available - using basic processing")
+    WOLFCORE_AVAILABLE = False
 
-@router.get("/loading-status")
-async def get_loading_status():
-    """Get progressive loading status of premium features"""
+# In-memory job storage (will be replaced with Redis/DB in production)
+processing_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+async def cleanup_temp_file(file_path: str):
+    """Clean up temporary file after processing"""
     try:
-        if ENHANCED_MODULES_AVAILABLE:
-            from wolfcore import get_loading_status
-            status = get_loading_status()
-            return status
-        else:
-            return {
-                "basic_features": True,
-                "premium_features": False,
-                "enhanced_modules": False,
-                "message": "Enhanced modules not available"
-            }
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+            logger.debug(f"Cleaned up temp file: {file_path}")
     except Exception as e:
-        logger.error(f"Error getting loading status: {e}")
-        return {"error": str(e)}
+        logger.error(f"Error cleaning up temp file: {e}")
 
-
-@router.get("/tokenizers")
-async def get_available_tokenizers():
-    """Get list of available tokenizers"""
-    try:
-        if ENHANCED_MODULES_AVAILABLE:
-            from wolfcore import get_supported_tokenizers
-            return get_supported_tokenizers()
-        else:
-            return ["word-estimate"]
-    except Exception as e:
-        logger.error(f"Error getting tokenizers: {e}")
-        return ["word-estimate"]
-
-
-# =============================================================================
-# QUICK PROCESSING (No Auth Required)
-# =============================================================================
 
 @router.post("/quick-process")
-async def quick_process_file(
+async def quick_process(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    tokenizer: str = Form("word-estimate"),
-    max_tokens: int = Form(1024),
-    chunk_method: str = Form("paragraph")
+    tokenizer: Optional[str] = Form("gpt-4"),
+    max_tokens: Optional[int] = Form(1000),
+    chunk_method: Optional[str] = Form("paragraph"),
+    preserve_structure: Optional[bool] = Form(True),
+    user=Depends(get_current_user),
+    rate_limiter=Depends(get_rate_limiter)
 ):
     """
-    Process file immediately without authentication
-    Enhanced version with graceful fallbacks
+    Quick processing endpoint for previews (existing functionality)
+    Returns first 3 chunks with truncated text for UI preview
     """
-    temp_file = None
+    # Rate limiting check
+    if not await rate_limiter.check_processing_limit(user):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    
+    # Create temporary file
+    temp_file = None
     try:
-        logger.info(f"Quick processing file: {file.filename}")
-        
-        # Validate file
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided")
-        
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+        suffix = f".{file.filename.split('.')[-1]}" if '.' in file.filename else ""
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix=suffix) as tmp:
             content = await file.read()
             tmp.write(content)
             temp_file = tmp.name
         
-        if ENHANCED_MODULES_AVAILABLE:
-            # Use enhanced processing
+        logger.info(f"Processing file for preview: {file.filename}")
+        
+        if WOLFCORE_AVAILABLE:
             try:
-                config = WolfcoreProcessingConfig(
-                    chunk_method=chunk_method,
+                # Use wolfcore for processing
+                wf = Wolfstitch()
+                result = await wf.process_file_async(
+                    temp_file,
+                    tokenizer=tokenizer,
                     max_tokens=max_tokens,
-                    tokenizer=tokenizer
+                    chunk_method=chunk_method,
+                    preserve_structure=preserve_structure
                 )
                 
-                processor = Wolfstitch(config)
-                result = await processor.process_file_async(temp_file)
-                
-                # Convert to simple dict response
+                # Return preview response
                 response_data = {
-                    "job_id": f"quick-{hash(file.filename)}",
+                    "job_id": f"quick-{uuid.uuid4().hex[:8]}",
                     "total_chunks": result.total_chunks,
                     "total_tokens": result.total_tokens,
                     "processing_time": result.processing_time,
@@ -125,27 +110,26 @@ async def quick_process_file(
                     "enhanced": True,
                     "chunks": [
                         {
-                            "text": chunk.text,
+                            "text": chunk.text[:100] if len(chunk.text) > 100 else chunk.text,
                             "token_count": chunk.token_count,
                             "chunk_index": chunk.chunk_index
                         }
-                        for chunk in result.chunks[:5]  # First 5 chunks for preview
+                        for chunk in result.chunks[:3]  # Preview: first 3 chunks only
                     ],
                     "file_info": result.file_info,
                     "metadata": result.metadata
                 }
                 
-            except Exception as enhanced_error:
-                logger.warning(f"Enhanced processing failed: {enhanced_error}, falling back to basic")
+            except Exception as e:
+                logger.warning(f"Enhanced processing failed: {e}, falling back to basic")
                 response_data = await _basic_processing_fallback(temp_file, file.filename)
         else:
-            # Use basic processing
             response_data = await _basic_processing_fallback(temp_file, file.filename)
         
         # Schedule cleanup
         background_tasks.add_task(cleanup_temp_file, temp_file)
         
-        logger.info(f"Processing completed: {response_data['total_chunks']} chunks")
+        logger.info(f"Preview processing completed: {response_data['total_chunks']} chunks")
         return response_data
         
     except Exception as e:
@@ -155,182 +139,272 @@ async def quick_process_file(
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
-async def _basic_processing_fallback(temp_file: str, filename: str):
-    """Fallback to basic processing if enhanced modules fail"""
+@router.post("/process-full")
+async def process_full(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    tokenizer: Optional[str] = Form("gpt-4"),
+    max_tokens: Optional[int] = Form(1000),
+    chunk_method: Optional[str] = Form("paragraph"),
+    preserve_structure: Optional[bool] = Form(True),
+    export_format: Optional[str] = Form("jsonl"),
+    user=Depends(get_current_user),
+    rate_limiter=Depends(get_rate_limiter)
+):
+    """
+    Full processing endpoint that processes complete files without limits.
+    Returns a job ID for tracking the processing status.
+    """
+    # Rate limiting check
+    if not await rate_limiter.check_processing_limit(user):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    
+    # Validate export format
+    valid_formats = ["jsonl", "json", "csv"]
+    if export_format not in valid_formats:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid export format. Must be one of: {', '.join(valid_formats)}"
+        )
+    
+    # Create job ID
+    job_id = f"job-{uuid.uuid4().hex}"
+    
+    # Initialize job status
+    processing_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "pending",
+        "progress": 0,
+        "filename": file.filename,
+        "created_at": datetime.utcnow().isoformat(),
+        "export_format": export_format,
+        "user_id": user.user_id,
+        "error": None,
+        "result": None,
+        "download_url": None
+    }
+    
+    # Save uploaded file
+    upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    file_path = os.path.join(upload_dir, f"{job_id}_{file.filename}")
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+    
+    # Process in background
+    background_tasks.add_task(
+        _process_file_background,
+        job_id=job_id,
+        file_path=file_path,
+        filename=file.filename,
+        config=ProcessingConfig(
+            tokenizer=tokenizer,
+            max_tokens=max_tokens,
+            chunk_method=chunk_method,
+            preserve_structure=preserve_structure
+        ),
+        export_format=export_format
+    )
+    
+    # Return job information
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "message": "File processing started. Use the job status endpoint to track progress.",
+        "status_url": f"/api/v1/jobs/{job_id}/status"
+    }
+
+
+async def _process_file_background(
+    job_id: str,
+    file_path: str,
+    filename: str,
+    config: ProcessingConfig,
+    export_format: str
+):
+    """
+    Background task to process file completely without limits
+    """
     try:
-        from wolfcore.parsers import FileParser
+        # Update status to processing
+        processing_jobs[job_id]["status"] = "processing"
+        processing_jobs[job_id]["progress"] = 10
         
-        parser = FileParser()
-        parsed_file = parser.parse(temp_file)
+        logger.info(f"Starting full processing for job {job_id}, file: {filename}")
         
-        # Basic paragraph chunking
-        chunks_text = [p.strip() for p in parsed_file.text.split("\n\n") if p.strip()]
-        if not chunks_text:
-            chunks_text = [parsed_file.text]
+        if not WOLFCORE_AVAILABLE:
+            raise Exception("Wolfcore not available for full processing")
         
-        total_tokens = sum(len(chunk.split()) * 1.3 for chunk in chunks_text)
+        # Initialize processor
+        wf = Wolfstitch()
+        
+        # Update progress
+        processing_jobs[job_id]["progress"] = 20
+        
+        # Process file completely - NO LIMITS
+        result = await wf.process_file_async(
+            file_path,
+            tokenizer=config.tokenizer,
+            max_tokens=config.max_tokens,
+            chunk_method=config.chunk_method,
+            preserve_structure=config.preserve_structure
+        )
+        
+        # Update progress
+        processing_jobs[job_id]["progress"] = 70
+        
+        # Store complete result with ALL chunks
+        processing_result = {
+            "filename": filename,
+            "total_chunks": result.total_chunks,
+            "total_tokens": result.total_tokens,
+            "total_characters": result.total_characters,
+            "processing_time": result.processing_time,
+            "chunks": [
+                {
+                    "chunk_id": idx + 1,
+                    "text": chunk.text,  # FULL TEXT - NO TRUNCATION
+                    "tokens": chunk.token_count,
+                    "start_pos": chunk.start_pos,
+                    "end_pos": chunk.end_pos,
+                    "metadata": {
+                        "chunk_method": config.chunk_method,
+                        "tokenizer": config.tokenizer
+                    }
+                }
+                for idx, chunk in enumerate(result.chunks)  # ALL CHUNKS - NO LIMIT
+            ],
+            "file_info": result.file_info,
+            "metadata": {
+                **result.metadata,
+                "export_format": export_format,
+                "job_id": job_id,
+                "processed_at": datetime.utcnow().isoformat()
+            }
+        }
+        
+        # Update progress
+        processing_jobs[job_id]["progress"] = 90
+        
+        # Generate export file using export service
+        export_info = await export_service.generate_export(
+            job_id=job_id,
+            processing_result=processing_result,
+            export_format=export_format
+        )
+        
+        # Store the export file and get download URL
+        storage_info = await storage_service.store_export_file(
+            source_path=Path(export_info["file_path"]),
+            job_id=job_id,
+            user_id=processing_jobs[job_id].get("user_id")
+        )
+        
+        # Update job with download information
+        processing_jobs[job_id]["download_url"] = storage_info["download_url"]
+        processing_jobs[job_id]["export_info"] = export_info
+        processing_jobs[job_id]["storage_info"] = storage_info
+        
+        # Store the result
+        processing_jobs[job_id]["result"] = processing_result
+        
+        # Update job status
+        processing_jobs[job_id]["status"] = "completed"
+        processing_jobs[job_id]["progress"] = 100
+        processing_jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
+        
+        # Clean up uploaded file
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+        
+        logger.info(f"Full processing completed for job {job_id}: {result.total_chunks} chunks")
+        
+    except Exception as e:
+        logger.error(f"Error processing job {job_id}: {str(e)}")
+        processing_jobs[job_id]["status"] = "failed"
+        processing_jobs[job_id]["error"] = str(e)
+        processing_jobs[job_id]["failed_at"] = datetime.utcnow().isoformat()
+        
+        # Clean up on error
+        if os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except:
+                pass
+
+
+async def _basic_processing_fallback(temp_file: str, filename: str):
+    """Fallback to basic processing if enhanced modules unavailable"""
+    try:
+        with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        # Basic chunking by paragraphs
+        chunks = [p.strip() for p in content.split('\n\n') if p.strip()]
         
         return {
-            "job_id": f"basic-{hash(filename)}",
-            "total_chunks": len(chunks_text),
-            "total_tokens": int(total_tokens),
-            "processing_time": 1.0,
+            "job_id": f"basic-{uuid.uuid4().hex[:8]}",
+            "total_chunks": len(chunks),
+            "total_tokens": sum(len(chunk.split()) for chunk in chunks),
+            "processing_time": 0.1,
             "status": "completed",
             "enhanced": False,
             "chunks": [
                 {
-                    "text": chunk,
-                    "token_count": int(len(chunk.split()) * 1.3),
+                    "text": chunk[:100] if len(chunk) > 100 else chunk,
+                    "token_count": len(chunk.split()),
                     "chunk_index": i
                 }
-                for i, chunk in enumerate(chunks_text[:5])
+                for i, chunk in enumerate(chunks[:3])
             ],
             "file_info": {
-                "filename": parsed_file.filename,
-                "format": parsed_file.format,
-                "size_bytes": parsed_file.size_bytes
+                "filename": filename,
+                "size": os.path.getsize(temp_file)
             },
-            "metadata": {"processing_type": "basic_fallback"}
+            "metadata": {
+                "processor": "basic",
+                "note": "Enhanced processing unavailable"
+            }
         }
     except Exception as e:
-        logger.error(f"Even basic processing failed: {e}")
+        logger.error(f"Basic processing failed: {e}")
         raise
 
 
-# =============================================================================
-# TESTING ENDPOINTS (Development Only)
-# =============================================================================
-
-@router.post("/test-enhanced")
-async def test_enhanced_modules():
-    """Test if enhanced modules are working"""
-    result = {
-        "enhanced_modules_available": ENHANCED_MODULES_AVAILABLE,
-        "schemas_available": SCHEMAS_AVAILABLE,
-        "auth_available": AUTH_AVAILABLE,
-        "rate_limiter_available": RATE_LIMITER_AVAILABLE
+# Job status endpoint (basic implementation for now)
+@router.get("/jobs/{job_id}/status")
+async def get_job_status(job_id: str):
+    """Get the status of a processing job"""
+    if job_id not in processing_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = processing_jobs[job_id]
+    
+    # Build response
+    response = {
+        "job_id": job_id,
+        "status": job["status"],
+        "progress": job["progress"],
+        "filename": job["filename"],
+        "created_at": job["created_at"],
+        "export_format": job["export_format"]
     }
     
-    if ENHANCED_MODULES_AVAILABLE:
-        try:
-            # Quick test of each module
-            from wolfcore.cleaner import clean_text
-            from wolfcore.chunker import split_text
-            from wolfcore import Wolfstitch
-            
-            # Test cleaner
-            cleaned = clean_text("Test   text", file_extension=".txt")
-            result["cleaner_test"] = "PASS" if "Test text" in cleaned else "FAIL"
-            
-            # Test chunker
-            chunks = split_text("Para 1\n\nPara 2", method="paragraph")
-            result["chunker_test"] = "PASS" if len(chunks) == 2 else "FAIL"
-            
-            # Test processor
-            processor = Wolfstitch()
-            tokenizers = processor.get_available_tokenizers()
-            result["processor_test"] = "PASS" if len(tokenizers) > 0 else "FAIL"
-            
-        except Exception as e:
-            result["test_error"] = str(e)
+    # Add error info if failed
+    if job["status"] == "failed":
+        response["error"] = job["error"]
+        response["failed_at"] = job.get("failed_at")
     
-    return result
-
-
-@router.post("/test-cleaner")
-async def test_text_cleaner(
-    text: str = Form("Test   text   with   spaces"),
-    file_extension: str = Form(".txt")
-):
-    """Test the enhanced text cleaner"""
-    try:
-        if ENHANCED_MODULES_AVAILABLE:
-            cleaned = await clean_text_async(text, file_extension=file_extension)
-            return {
-                "original": text,
-                "cleaned": cleaned,
-                "enhanced": True,
-                "original_length": len(text),
-                "cleaned_length": len(cleaned)
-            }
-        else:
-            return {
-                "original": text,
-                "cleaned": text.strip(),
-                "enhanced": False,
-                "message": "Enhanced modules not available"
-            }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@router.post("/test-chunker")
-async def test_text_chunker(
-    text: str = Form("First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here."),
-    chunk_method: str = Form("paragraph"),
-    max_tokens: int = Form(50)
-):
-    """Test the enhanced text chunker"""
-    try:
-        if ENHANCED_MODULES_AVAILABLE:
-            config = ChunkingConfig(
-                method=chunk_method,
-                max_tokens=max_tokens,
-                overlap_tokens=0
-            )
-            
-            chunks = await chunk_text_async(text, config)
-            
-            return {
-                "original_text": text,
-                "original_length": len(text),
-                "total_chunks": len(chunks),
-                "chunk_method": chunk_method,
-                "max_tokens": max_tokens,
-                "enhanced": True,
-                "chunks_preview": [
-                    {
-                        "index": chunk.chunk_index,
-                        "token_count": chunk.token_count,
-                        "text_preview": chunk.text[:100] + "..." if len(chunk.text) > 100 else chunk.text,
-                        "metadata": chunk.metadata
-                    }
-                    for chunk in chunks[:3]  # First 3 chunks
-                ]
-            }
-        else:
-            # Basic chunking fallback
-            if chunk_method == "paragraph":
-                basic_chunks = [p.strip() for p in text.split("\n\n") if p.strip()]
-            else:
-                basic_chunks = [text]
-            
-            return {
-                "original_text": text,
-                "total_chunks": len(basic_chunks),
-                "chunk_method": "basic_" + chunk_method,
-                "enhanced": False,
-                "chunks_preview": [
-                    {
-                        "index": i,
-                        "text_preview": chunk[:100] + "..." if len(chunk) > 100 else chunk
-                    }
-                    for i, chunk in enumerate(basic_chunks[:3])
-                ]
-            }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
-
-async def cleanup_temp_file(file_path: str):
-    """Clean up temporary file"""
-    try:
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-            logger.debug(f"Cleaned up temp file: {file_path}")
-    except Exception as e:
-        logger.warning(f"Failed to cleanup temp file {file_path}: {e}")
+    # Add completion info if done
+    elif job["status"] == "completed":
+        response["completed_at"] = job.get("completed_at")
+        response["download_url"] = job.get("download_url")
+        response["total_chunks"] = job["result"]["total_chunks"] if job["result"] else None
+        response["total_tokens"] = job["result"]["total_tokens"] if job["result"] else None
+    
+    return response
