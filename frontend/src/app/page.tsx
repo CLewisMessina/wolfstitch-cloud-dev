@@ -18,14 +18,15 @@ import {
   FolderOpen
 } from 'lucide-react';
 
-// Import feature flags and file utilities
-import { isBatchEnabled, isFolderDropEnabled } from '@/lib/feature-flags';
+// Import feature flags and file utilities - FIXED to match actual implementations
+import { isBatchEnabled, isFolderDropEnabled, isDebugMode } from '@/lib/feature-flags';
 import { 
   traverseFileTree, 
   processFileList, 
   validateFile, 
   formatFileSize,
-  SUPPORTED_EXTENSIONS 
+  SUPPORTED_EXTENSIONS,
+  type TraversalResult 
 } from '@/lib/file-utils';
 
 // Fixed Types for API responses - matching actual API response structure
@@ -226,7 +227,7 @@ export default function FileProcessor() {
     }
   };
 
-  // TASK 1.1.2: Enhanced file selection handler with folder support
+  // TASK 1.1.2: Enhanced file selection handler - FIXED to match actual file-utils.ts
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.target;
     const files = input.files;
@@ -248,31 +249,18 @@ export default function FileProcessor() {
         console.log(`Processing folder: ${pathParts[0]} with ${files.length} files`);
       }
       
-      // Process and validate files
-      const processedFiles = await processFileList(files);
+      // Process and validate files using actual file-utils implementation
+      const result: TraversalResult = processFileList(files);
       
-      // Validate each file
-      const validFiles: File[] = [];
-      const errors: string[] = [];
-      
-      for (const file of processedFiles) {
-        const validation = validateFile(file);
-        if (validation.isValid) {
-          validFiles.push(file);
-        } else {
-          errors.push(`${file.name}: ${validation.error}`);
-        }
+      if (result.errors.length > 0) {
+        setFileValidationErrors(result.errors);
+        console.warn('File validation errors:', result.errors);
       }
       
-      if (errors.length > 0) {
-        setFileValidationErrors(errors);
-        console.warn('File validation errors:', errors);
-      }
-      
-      if (validFiles.length > 0) {
-        setSelectedFiles(validFiles);
-        console.log(`Selected ${validFiles.length} valid files${isFolder ? ' from folder' : ''}`);
-        processFiles(validFiles);
+      if (result.files.length > 0) {
+        setSelectedFiles(result.files);
+        console.log(`Selected ${result.files.length} valid files${isFolder ? ' from folder' : ''}`);
+        processFiles(result.files);
       } else {
         setError('No valid files selected. Please check file formats and sizes.');
       }
@@ -283,7 +271,7 @@ export default function FileProcessor() {
     }
   };
 
-  // Enhanced drag and drop handler (placeholder for Task 1.2)
+  // TASK 1.2: Enhanced drag and drop handler - FIXED to match actual file-utils.ts
   const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     
@@ -297,14 +285,48 @@ export default function FileProcessor() {
       return;
     }
 
-    // TODO: Task 1.2 - Implement full folder drop support with FileSystemEntry API
-    console.log('Enhanced folder drop handler - to be implemented in Task 1.2');
-    
-    // Temporary fallback
-    const files = Array.from(event.dataTransfer.files);
-    setSelectedFiles(files);
-    if (files.length > 0) {
-      processFiles(files);
+    try {
+      setFileValidationErrors([]);
+      
+      // Check if we have directory entries
+      const items = event.dataTransfer.items;
+      const hasDirectories = Array.from(items).some(item => 
+        item.webkitGetAsEntry && item.webkitGetAsEntry()?.isDirectory
+      );
+      
+      setIsProcessingFolder(hasDirectories);
+      
+      if (hasDirectories) {
+        // Use actual traverseFileTree implementation
+        const result: TraversalResult = await traverseFileTree(items);
+        
+        if (result.files.length > 0) {
+          // Extract folder name from first file
+          const firstFile = result.files[0];
+          const pathParts = firstFile.webkitRelativePath?.split('/') || [];
+          setFolderName(pathParts[0] || 'Dropped Folder');
+          
+          if (result.errors.length > 0) {
+            setFileValidationErrors(result.errors);
+          }
+          
+          setSelectedFiles(result.files);
+          processFiles(result.files);
+        } else {
+          setError('No valid files found in dropped folders.');
+        }
+      } else {
+        // Handle individual files
+        const files = Array.from(event.dataTransfer.files);
+        setSelectedFiles(files);
+        if (files.length > 0) {
+          processFiles(files);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Drop handling error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to process dropped files');
     }
   };
 
@@ -383,7 +405,7 @@ export default function FileProcessor() {
                 multiple
                 onChange={handleFileSelect}
                 className="hidden"
-                accept={SUPPORTED_EXTENSIONS.map(ext => `.${ext}`).join(',')}
+                accept={SUPPORTED_EXTENSIONS.join(',')}
               />
               
               {/* TASK 1.1.1: Separate folder input with webkitdirectory */}
