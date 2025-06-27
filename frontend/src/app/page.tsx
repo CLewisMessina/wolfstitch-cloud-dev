@@ -618,29 +618,7 @@ export default function FileProcessor() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className={`w-3 h-3 rounded-full ${isBatchEnabled() ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                  <span className="text-gray-300">Batch Processing</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <div className={`w-3 h-3 rounded-full ${isFolderDropEnabled() ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                  <span className="text-gray-300">Folder Drop</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 rounded-full bg-green-400"></div>
-                  <span className="text-gray-300">Single File Processing</span>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 max-w-md mx-auto">
-                Feature flags control which capabilities are enabled. 
-                Folder support requires modern browser with FileSystemEntry API.
-              </p>
-            </div>
-          </footer>
-        )}
-      </div>
-    </div>
-  );
-}processingStep === 'complete' ? 'bg-green-400' : 'bg-gray-400'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${processingStep === 'complete' ? 'bg-green-400' : 'bg-gray-400'}`}></div>
                   <span className="text-gray-300">
                     {processingStep === 'complete' ? 'Processed' : 'Ready'}
                   </span>
@@ -683,4 +661,26 @@ export default function FileProcessor() {
               <h4 className="text-lg font-semibold text-white">Development Feature Status</h4>
               <div className="flex flex-wrap justify-center gap-4 text-sm">
                 <div className="flex items-center space-x-2">
-                  <div className={`w-3 h-3 rounded-full ${
+                  <div className={`w-3 h-3 rounded-full ${isBatchEnabled() ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                  <span className="text-gray-300">Batch Processing</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${isFolderDropEnabled() ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                  <span className="text-gray-300">Folder Drop</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full bg-green-400"></div>
+                  <span className="text-gray-300">Single File Processing</span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 max-w-md mx-auto">
+                Feature flags control which capabilities are enabled. 
+                Folder support requires modern browser with FileSystemEntry API.
+              </p>
+            </div>
+          </footer>
+        )}
+      </div>
+    </div>
+  );
+}
