@@ -14,8 +14,19 @@ import {
   ChevronDown,
   Zap,
   Activity,
-  AlertCircle
+  AlertCircle,
+  FolderOpen
 } from 'lucide-react';
+
+// Import feature flags and file utilities
+import { isBatchEnabled, isFolderDropEnabled } from '@/lib/feature-flags';
+import { 
+  traverseFileTree, 
+  processFileList, 
+  validateFile, 
+  formatFileSize,
+  SUPPORTED_EXTENSIONS 
+} from '@/lib/file-utils';
 
 // Fixed Types for API responses - matching actual API response structure
 interface ChunkPreview {
@@ -57,6 +68,8 @@ const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Wolfstitch';
 const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
 
 console.log('API URL:', API_URL);
+console.log('Batch enabled:', isBatchEnabled());
+console.log('Folder drop enabled:', isFolderDropEnabled());
 
 export default function FileProcessor() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -65,186 +78,207 @@ export default function FileProcessor() {
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFileDetails, setShowFileDetails] = useState(false);
+  const [isProcessingFolder, setIsProcessingFolder] = useState(false);
+  const [folderName, setFolderName] = useState<string>('');
+  const [fileValidationErrors, setFileValidationErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Circular progress component (from production version)
-  const CircularProgress = ({ percentage, size = 140 }: { percentage: number; size?: number }) => (
-    <div className="relative inline-flex items-center justify-center">
-      <svg
-        className="transform -rotate-90"
-        width={size}
-        height={size}
-      >
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={size / 2 - 8}
-          stroke="currentColor"
-          strokeWidth="6"
-          fill="transparent"
-          className="text-gray-700"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={size / 2 - 8}
-          stroke="currentColor"
-          strokeWidth="6"
-          fill="transparent"
-          strokeDasharray={`${2 * Math.PI * (size / 2 - 8)}`}
-          strokeDashoffset={`${2 * Math.PI * (size / 2 - 8) * (1 - percentage / 100)}`}
-          className="text-[#FF6B47] transition-all duration-500 ease-out"
-          strokeLinecap="round"
-        />
-      </svg>
-      <div className="absolute flex flex-col items-center">
-        <span className="text-3xl font-bold text-white">
-          {Math.round(percentage)}%
-        </span>
-        <span className="text-xs text-gray-300 mt-1">
-          {percentage < 30 && "Parsing"}
-          {percentage >= 30 && percentage < 70 && "Cleaning"}
-          {percentage >= 70 && "Chunking"}
-        </span>
+  const CircularProgress = ({ percentage, size = 140 }: { percentage: number; size?: number }) => {
+    const radius = (size - 12) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference - (percentage / 100) * circumference;
+
+    return (
+      <div className="relative inline-flex items-center justify-center">
+        <svg width={size} height={size} className="transform -rotate-90">
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="rgba(255, 255, 255, 0.1)"
+            strokeWidth="6"
+            fill="transparent"
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="url(#gradient)"
+            strokeWidth="6"
+            fill="transparent"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            className="transition-all duration-500 ease-in-out"
+          />
+          <defs>
+            <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#FF6B47" />
+              <stop offset="100%" stopColor="#4ECDC4" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-2xl font-bold text-white">{Math.round(percentage)}%</span>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  // Process files - either for preview or full download (enhanced from dev version)
-  const processFiles = async (files: File[], isFullProcessing: boolean = false) => {
-    if (files.length === 0) return;
-
-    const file = files[0]; // Process first file for now
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('tokenizer', 'gpt-4');
-    formData.append('max_tokens', '1000');
-    formData.append('chunk_method', 'paragraph');
-    formData.append('preserve_structure', 'true');
+  // Enhanced file processing function
+  const processFiles = async (files: File[]) => {
+    if (!files || files.length === 0) return;
     
-    if (isFullProcessing) {
-      formData.append('export_format', 'jsonl');
-    }
+    setProcessingStep('processing');
+    setProgress(0);
+    setError(null);
+    setProcessingResult(null);
 
     try {
-      setProcessingStep('processing');
-      setProgress(10);
-      setError(null);
-
-      // Choose endpoint based on processing type
-      const endpoint = isFullProcessing ? '/api/v1/process-full' : '/api/v1/quick-process';
-      
-      // Animate progress (from production version)
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + Math.random() * 15;
-        });
-      }, 200);
-
-      console.log(`Processing file with API: ${API_URL}`);
-      console.log('FormData contents:', {
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type || 'application/octet-stream'  // Mobile fix
-      });
-      
-      const response = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        body: formData,
-        mode: 'cors',
-      });
-
-      clearInterval(progressInterval);
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || data.message || 'Processing failed');
-      }
-
-      if (isFullProcessing) {
-        // Handle full processing with job tracking
-        return data.job_id;
+      // Handle batch processing if enabled and multiple files
+      if (isBatchEnabled() && files.length > 1) {
+        await processBatch(files);
       } else {
-        // Handle quick preview
-        setProgress(100);
-        setProcessingResult(data);
-        setTimeout(() => {
-          setProcessingStep('complete');
-        }, 500);
+        // Single file processing (existing logic)
+        await processSingleFile(files[0]);
       }
     } catch (error) {
       console.error('Processing error:', error);
-      setError(error instanceof Error ? error.message : 'Unknown error occurred');
+      setError(error instanceof Error ? error.message : 'Processing failed');
       setProcessingStep('error');
     }
   };
 
-  // Download functionality with full processing (enhanced from dev version)
-  const downloadResults = async () => {
-    if (!selectedFiles[0]) return;
-    
+  // Single file processing (existing logic)
+  const processSingleFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('tokenizer', 'gpt-4');
+    formData.append('max_tokens', '1000');
+    formData.append('overlap_tokens', '100');
+
+    // Progress simulation for single file
+    const progressInterval = setInterval(() => {
+      setProgress(prev => Math.min(prev + Math.random() * 15, 85));
+    }, 500);
+
     try {
-      setProcessingStep('processing');
-      setProgress(0);
+      const response = await fetch(`${API_URL}/api/v1/quick-process`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const result: ProcessingResult = await response.json();
+      setProcessingResult(result);
+      setProcessingStep('complete');
+      setProgress(100);
+      
+    } catch (error) {
+      clearInterval(progressInterval);
+      throw error;
+    }
+  };
+
+  // New batch processing function
+  const processBatch = async (files: File[]) => {
+    const formData = new FormData();
+    
+    // Add all files to form data
+    files.forEach((file, index) => {
+      formData.append(`files`, file);
+    });
+    
+    formData.append('tokenizer', 'gpt-4');
+    formData.append('max_tokens', '1000');
+    formData.append('overlap_tokens', '100');
+
+    // Progress simulation for batch
+    const progressInterval = setInterval(() => {
+      setProgress(prev => Math.min(prev + Math.random() * 10, 85));
+    }, 1000);
+
+    try {
+      const response = await fetch(`${API_URL}/api/v1/batch-process`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Batch processing failed: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const result: ProcessingResult = await response.json();
+      setProcessingResult(result);
+      setProcessingStep('complete');
+      setProgress(100);
+      
+    } catch (error) {
+      clearInterval(progressInterval);
+      throw error;
+    }
+  };
+
+  // Download results
+  const downloadResults = async () => {
+    if (!processingResult) return;
+
+    try {
       setError(null);
       
-      // Call the full processing endpoint
-      const jobId = await processFiles(selectedFiles, true);
-      
-      console.log('Full processing started:', jobId);
-      
-      // Poll for job status
-      let jobComplete = false;
-      let downloadUrl = null;
-      
-      while (!jobComplete) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Poll every second
+      if (processingResult.job_id && isBatchEnabled()) {
+        // Download batch results
+        const response = await fetch(`${API_URL}/api/v1/batch/${processingResult.job_id}/download`);
         
-        const statusResponse = await fetch(`${API_URL}/api/v1/jobs/${jobId}/status`);
-        if (!statusResponse.ok) {
-          throw new Error('Failed to check job status');
+        if (!response.ok) {
+          throw new Error(`Download failed: ${response.status} ${response.statusText}`);
         }
-        
-        const status = await statusResponse.json();
-        
-        // Update progress
-        setProgress(status.progress || 0);
-        
-        if (status.status === 'completed') {
-          jobComplete = true;
-          downloadUrl = status.download_url;
-          console.log('Processing completed:', status);
-        } else if (status.status === 'failed') {
-          throw new Error(status.error || 'Processing failed');
-        }
-      }
-      
-      if (downloadUrl) {
-        // Download the file
-        console.log('Downloading from:', downloadUrl);
-        
-        // For development, construct full URL if needed
-        const fullDownloadUrl = downloadUrl.startsWith('http') 
-          ? downloadUrl 
-          : `${API_URL}${downloadUrl}`;
-        
-        // Create a temporary anchor element to trigger download
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = fullDownloadUrl;
-        link.download = selectedFiles[0].name.replace(/\.[^/.]+$/, '') + '_processed.jsonl';
+        link.href = url;
+        link.download = `batch_${processingResult.job_id}_processed.jsonl`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         
-        setProcessingStep('complete');
-        setProgress(100);
-        console.log('Download initiated successfully');
+      } else {
+        // Single file download (existing logic)
+        const chunks = processingResult.chunks || processingResult.preview || [];
+        const jsonlContent = chunks.map(chunk => JSON.stringify({
+          text: chunk.text,
+          tokens: chunk.token_count || chunk.tokens || 0,
+          metadata: {
+            chunk_index: chunk.chunk_index,
+            filename: processingResult.filename,
+            processing_time: processingResult.processing_time,
+          }
+        })).join('\n');
+
+        const blob = new Blob([jsonlContent], { type: 'application/jsonl' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = processingResult.filename.replace(/\.[^/.]+$/, '') + '_processed.jsonl';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
       }
+      
+      setProcessingStep('complete');
+      setProgress(100);
+      console.log('Download initiated successfully');
       
     } catch (error) {
       console.error('Download error:', error);
@@ -253,30 +287,142 @@ export default function FileProcessor() {
     }
   };
 
-  // File selection handlers (enhanced with mobile debugging)
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    // Mobile fix: Log file details for debugging
-    files.forEach(file => {
-      console.log('Selected file details:', {
-        name: file.name,
-        size: file.size,
-        type: file.type || 'unknown',
-        lastModified: file.lastModified
-      });
-    });
-    setSelectedFiles(files);
-    if (files.length > 0) {
-      processFiles(files);
+  // Enhanced file selection handler with folder support
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.target;
+    const files = input.files;
+    
+    if (!files || files.length === 0) return;
+
+    try {
+      setFileValidationErrors([]);
+      
+      // Check if this is a folder selection
+      const isFolder = input.webkitdirectory;
+      setIsProcessingFolder(isFolder);
+      
+      if (isFolder) {
+        // Extract folder name from first file path
+        const firstFile = files[0];
+        const pathParts = firstFile.webkitRelativePath?.split('/') || [];
+        setFolderName(pathParts[0] || 'Unknown Folder');
+      }
+      
+      // Process and validate files
+      const processedFiles = await processFileList(files);
+      
+      // Validate each file
+      const validFiles: File[] = [];
+      const errors: string[] = [];
+      
+      for (const file of processedFiles) {
+        const validation = validateFile(file);
+        if (validation.isValid) {
+          validFiles.push(file);
+        } else {
+          errors.push(`${file.name}: ${validation.error}`);
+        }
+      }
+      
+      if (errors.length > 0) {
+        setFileValidationErrors(errors);
+      }
+      
+      if (validFiles.length > 0) {
+        setSelectedFiles(validFiles);
+        console.log(`Selected ${validFiles.length} valid files${isFolder ? ' from folder' : ''}`);
+        processFiles(validFiles);
+      } else {
+        setError('No valid files selected. Please check file formats and sizes.');
+      }
+      
+    } catch (error) {
+      console.error('File selection error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to process selected files');
     }
   };
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  // Enhanced drag and drop handler with folder support
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const files = Array.from(event.dataTransfer.files);
-    setSelectedFiles(files);
-    if (files.length > 0) {
-      processFiles(files);
+    
+    if (!isFolderDropEnabled()) {
+      // Fallback to simple file handling
+      const files = Array.from(event.dataTransfer.files);
+      setSelectedFiles(files);
+      if (files.length > 0) {
+        processFiles(files);
+      }
+      return;
+    }
+
+    try {
+      setFileValidationErrors([]);
+      const items = Array.from(event.dataTransfer.items);
+      
+      // Check if we have directory entries
+      const hasDirectories = items.some(item => 
+        item.webkitGetAsEntry && item.webkitGetAsEntry()?.isDirectory
+      );
+      
+      setIsProcessingFolder(hasDirectories);
+      
+      if (hasDirectories) {
+        // Process folders using FileSystemEntry API
+        const allFiles: File[] = [];
+        
+        for (const item of items) {
+          if (item.webkitGetAsEntry) {
+            const entry = item.webkitGetAsEntry();
+            if (entry) {
+              const files = await traverseFileTree(entry);
+              allFiles.push(...files);
+            }
+          }
+        }
+        
+        if (allFiles.length > 0) {
+          // Extract folder name from first file
+          const firstFile = allFiles[0];
+          const pathParts = firstFile.webkitRelativePath?.split('/') || [];
+          setFolderName(pathParts[0] || 'Dropped Folder');
+          
+          // Validate files
+          const validFiles: File[] = [];
+          const errors: string[] = [];
+          
+          for (const file of allFiles) {
+            const validation = validateFile(file);
+            if (validation.isValid) {
+              validFiles.push(file);
+            } else {
+              errors.push(`${file.name}: ${validation.error}`);
+            }
+          }
+          
+          if (errors.length > 0) {
+            setFileValidationErrors(errors);
+          }
+          
+          if (validFiles.length > 0) {
+            setSelectedFiles(validFiles);
+            processFiles(validFiles);
+          } else {
+            setError('No valid files found in dropped folders.');
+          }
+        }
+      } else {
+        // Handle individual files
+        const files = Array.from(event.dataTransfer.files);
+        setSelectedFiles(files);
+        if (files.length > 0) {
+          processFiles(files);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Drop handling error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to process dropped files');
     }
   };
 
@@ -292,18 +438,12 @@ export default function FileProcessor() {
     setProcessingResult(null);
     setError(null);
     setShowFileDetails(false);
+    setIsProcessingFolder(false);
+    setFolderName('');
+    setFileValidationErrors([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  };
-
-  // Format file size
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   // Get file icon based on extension (enhanced from production)
@@ -355,18 +495,18 @@ export default function FileProcessor() {
             <span className="bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] bg-clip-text text-transparent"> AI-Ready Datasets</span>
           </h2>
           <p className="text-gray-300 text-lg max-w-2xl mx-auto">
-            Professional-grade document processing with intelligent chunking, 40+ file formats, and beautiful export options
+            Professional-grade document processing with intelligent chunking, 40+ file formats, and {isBatchEnabled() ? 'batch processing for entire folders' : 'beautiful export options'}
           </p>
           {ENVIRONMENT === 'development' && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mx-auto max-w-md">
               <p className="text-yellow-300 text-sm">
-                🚧 Development Mode - API: {API_URL}
+                🚧 Development Mode - Batch: {isBatchEnabled() ? 'ON' : 'OFF'} | Folder Drop: {isFolderDropEnabled() ? 'ON' : 'OFF'}
               </p>
             </div>
           )}
         </section>
 
-        {/* Upload Section - Enhanced styling from production */}
+        {/* Upload Section - Enhanced styling with folder support */}
         {processingStep === 'upload' && (
           <section className="space-y-6">
             <div 
@@ -379,138 +519,165 @@ export default function FileProcessor() {
                 ref={fileInputRef}
                 type="file"
                 multiple
+                {...(isFolderDropEnabled() ? { webkitdirectory: true } : {})}
                 onChange={handleFileSelect}
                 className="hidden"
-                accept=".pdf,.docx,.txt,.md,.py,.js,.json,.csv,.pptx,.xlsx"
+                accept={SUPPORTED_EXTENSIONS.map(ext => `.${ext}`).join(',')}
               />
               <div className="space-y-6">
                 <div className="mx-auto w-20 h-20 bg-gradient-to-br from-[#FF6B47] to-[#E85555] rounded-full flex items-center justify-center shadow-xl">
-                  <Upload className="w-10 h-10 text-white" />
+                  {isFolderDropEnabled() ? (
+                    <FolderOpen className="w-10 h-10 text-white" />
+                  ) : (
+                    <Upload className="w-10 h-10 text-white" />
+                  )}
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-white mb-2">
-                    Drop files here or click to browse
+                    {isFolderDropEnabled() ? 'Drop files or folders here' : 'Drop files here or click to browse'}
                   </p>
                   <p className="text-gray-300">
-                    PDF, DOCX, TXT, code files, presentations, or entire folders
+                    PDF, DOCX, TXT, code files, presentations{isFolderDropEnabled() ? ', or entire folders' : ''}
                   </p>
+                  {isBatchEnabled() && (
+                    <p className="text-sm text-[#4ECDC4] mt-2">
+                      ✨ Batch processing enabled - process multiple files at once
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-4">
                   <button className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105">
-                    <Upload className="w-5 h-5 mr-2" />
-                    Choose Files
+                    {isFolderDropEnabled() ? (
+                      <>
+                        <FolderOpen className="w-5 h-5 mr-2" />
+                        Choose Files or Folder
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-5 h-5 mr-2" />
+                        Choose Files
+                      </>
+                    )}
                   </button>
                   <p className="text-sm text-gray-400">
-                    or drag and drop your documents here
+                    or drag and drop your documents{isFolderDropEnabled() ? ' or folders' : ''} here
                   </p>
+                  {isBatchEnabled() && (
+                    <p className="text-xs text-gray-500">
+                      Max {100} files per batch, {100}MB per file
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Validation Errors Display */}
+            {fileValidationErrors.length > 0 && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                <div className="flex items-center mb-2">
+                  <AlertCircle className="w-5 h-5 text-yellow-400 mr-2" />
+                  <h4 className="text-yellow-300 font-medium">File Validation Warnings</h4>
+                </div>
+                <div className="text-sm text-yellow-200 space-y-1">
+                  {fileValidationErrors.map((error, index) => (
+                    <p key={index}>• {error}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Processing Section */}
+        {processingStep === 'processing' && (
+          <section className="text-center space-y-8">
+            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-8">
+              <CircularProgress percentage={progress} />
+              <div className="mt-6 space-y-2">
+                <h3 className="text-2xl font-bold text-white">
+                  {isProcessingFolder ? `Processing ${folderName}` : 'Processing Document'}
+                </h3>
+                <p className="text-gray-300">
+                  {selectedFiles.length > 1 
+                    ? `Processing ${selectedFiles.length} files...` 
+                    : 'Analyzing content and generating chunks...'
+                  }
+                </p>
+                <div className="w-full bg-gray-700 rounded-full h-2 max-w-md mx-auto">
+                  <div 
+                    className="bg-gradient-to-r from-[#FF6B47] to-[#4ECDC4] h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  ></div>
                 </div>
               </div>
             </div>
           </section>
         )}
 
-        {/* Processing Section - Using production's circular progress with dev's enhanced processing */}
-        {processingStep === 'processing' && (
-          <section className="text-center space-y-8">
-            <div className="flex flex-col items-center space-y-8">
-              <CircularProgress percentage={progress} />
-              <div className="space-y-2">
-                <h3 className="text-2xl font-bold text-white">
-                  Processing Your Document
-                </h3>
-                <p className="text-gray-300">
-                  {progress < 20 && "Uploading file..."}
-                  {progress >= 20 && progress < 70 && "Processing chunks..."}
-                  {progress >= 70 && progress < 90 && "Generating export..."}
-                  {progress >= 90 && "Finalizing download..."}
-                </p>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Error Section - Enhanced from production styling */}
+        {/* Error Section */}
         {processingStep === 'error' && (
           <section className="text-center space-y-6">
-            <div className="flex flex-col items-center space-y-6">
-              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center">
-                <AlertCircle className="w-10 h-10 text-red-400" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-2xl font-bold text-white">
-                  Processing Failed
-                </h3>
-                <p className="text-gray-300 max-w-md mx-auto">
-                  {error || 'Something went wrong while processing your file. Please try again.'}
-                </p>
-              </div>
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-8">
+              <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
+              <h3 className="text-2xl font-bold text-white mb-2">Processing Failed</h3>
+              <p className="text-red-300 mb-6">{error}</p>
               <button
                 onClick={resetApp}
                 className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105"
               >
+                <Upload className="w-5 h-5 mr-2" />
                 Try Again
               </button>
             </div>
           </section>
         )}
 
-        {/* Results Section - Enhanced with production styling and dev functionality */}
+        {/* Results Section */}
         {processingStep === 'complete' && processingResult && (
           <section className="space-y-6">
-            <div className="text-center space-y-4">
-              <div className="w-20 h-20 bg-[#4ECDC4]/20 rounded-full flex items-center justify-center mx-auto">
-                <CheckCircle className="w-10 h-10 text-[#4ECDC4]" />
-              </div>
-              <h3 className="text-2xl font-bold text-white">
-                Processing Complete!
+            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-8 text-center">
+              <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
+              <h3 className="text-2xl font-bold text-white mb-2">
+                {selectedFiles.length > 1 ? 'Batch Processing Complete!' : 'Processing Complete!'}
               </h3>
-              <p className="text-gray-300">
-                Your document has been successfully processed and chunked
-              </p>
-            </div>
-
-            {/* Results Summary */}
-            <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-[#FF6B47] mb-1">
-                    {processingResult.total_chunks || 0}
+              
+              {/* Enhanced results display for batch processing */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 my-8">
+                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600">
+                  <div className="text-2xl font-bold text-[#4ECDC4]">
+                    {processingResult.total_chunks || (processingResult.chunks?.length) || 0}
                   </div>
-                  <div className="text-sm text-gray-300">Chunks Created</div>
+                  <div className="text-gray-300 text-sm">Total Chunks</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-[#4ECDC4] mb-1">
-                    {processingResult.total_tokens?.toLocaleString() || '0'}
+                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600">
+                  <div className="text-2xl font-bold text-[#FF6B47]">
+                    {processingResult.total_tokens || 0}
                   </div>
-                  <div className="text-sm text-gray-300">Total Tokens</div>
+                  <div className="text-gray-300 text-sm">Total Tokens</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-white mb-1">
-                    {processingResult.total_tokens && processingResult.total_chunks 
-                      ? Math.round(processingResult.total_tokens / processingResult.total_chunks)
-                      : 0
-                    }
+                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600">
+                  <div className="text-2xl font-bold text-green-400">
+                    {selectedFiles.length}
                   </div>
-                  <div className="text-sm text-gray-300">Avg Tokens/Chunk</div>
+                  <div className="text-gray-300 text-sm">{selectedFiles.length === 1 ? 'File' : 'Files'} Processed</div>
                 </div>
               </div>
 
-              {/* Preview Section - Enhanced with dev's better data handling */}
-              {((processingResult.chunks && processingResult.chunks.length > 0) || 
-                (processingResult.preview && processingResult.preview.length > 0)) && (
-                <div className="bg-gray-800/50 rounded-xl p-6 mb-8 border border-gray-600">
-                  <h4 className="font-semibold text-white mb-4 flex items-center">
+              {/* Preview section for single files */}
+              {!isBatchEnabled() && processingResult.chunks && processingResult.chunks.length > 0 && (
+                <div className="text-left">
+                  <h4 className="text-lg font-semibold text-white mb-4 flex items-center">
                     <Eye className="w-5 h-5 mr-2 text-[#4ECDC4]" />
-                    Preview (First Chunks)
+                    Content Preview
                   </h4>
-                  <div className="space-y-4">
-                    {(processingResult.chunks || processingResult.preview || []).slice(0, 3).map((chunk, index) => (
-                      <div key={index} className="bg-gray-900 rounded-lg border border-gray-700 p-4">
-                        <div className="font-mono text-sm text-gray-300 leading-relaxed line-clamp-3">
-                          {chunk.text}
+                  <div className="space-y-4 max-h-64 overflow-y-auto">
+                    {processingResult.chunks.slice(0, 3).map((chunk, index) => (
+                      <div key={index} className="bg-gray-800/50 rounded-lg p-4 border border-gray-600">
+                        <div className="text-gray-300 text-sm mb-2 line-clamp-3">
+                          {chunk.text.substring(0, 200)}...
                         </div>
-                        <div className="mt-2 text-xs text-gray-500 flex justify-between">
-                          <span>Chunk {chunk.chunk_index !== undefined ? chunk.chunk_index + 1 : index + 1}</span>
+                        <div className="flex justify-between text-xs text-gray-400">
+                          <span>Chunk {chunk.chunk_index ? chunk.chunk_index + 1 : index + 1}</span>
                           <span>{chunk.token_count || chunk.tokens || 0} tokens</span>
                         </div>
                       </div>
@@ -520,7 +687,7 @@ export default function FileProcessor() {
               )}
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
                 <button
                   onClick={resetApp}
                   className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-[#FF6B47] to-[#E85555] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[rgba(255,107,71,0.3)] transition-all duration-300 transform hover:scale-105"
@@ -546,8 +713,17 @@ export default function FileProcessor() {
             <div className="bg-[rgba(255,255,255,0.05)] backdrop-blur-sm rounded-2xl shadow-xl border border-gray-700 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-bold text-white flex items-center">
-                  <Folder className="w-5 h-5 mr-2 text-[#4ECDC4]" />
-                  Selected Files ({selectedFiles.length})
+                  {isProcessingFolder ? (
+                    <>
+                      <FolderOpen className="w-5 h-5 mr-2 text-[#4ECDC4]" />
+                      {folderName} ({selectedFiles.length} files)
+                    </>
+                  ) : (
+                    <>
+                      <Folder className="w-5 h-5 mr-2 text-[#4ECDC4]" />
+                      Selected Files ({selectedFiles.length})
+                    </>
+                  )}
                 </h3>
                 <button 
                   onClick={() => setShowFileDetails(!showFileDetails)}
@@ -559,21 +735,88 @@ export default function FileProcessor() {
                 </button>
               </div>
               
+              {/* File list summary */}
+              <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-600">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-400">Total Files:</span>
+                    <span className="text-white ml-2 font-medium">{selectedFiles.length}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Total Size:</span>
+                    <span className="text-white ml-2 font-medium">
+                      {formatFileSize(selectedFiles.reduce((sum, file) => sum + file.size, 0))}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Avg Size:</span>
+                    <span className="text-white ml-2 font-medium">
+                      {formatFileSize(selectedFiles.reduce((sum, file) => sum + file.size, 0) / selectedFiles.length)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Status:</span>
+                    <span className="text-green-400 ml-2 font-medium">
+                      {processingStep === 'complete' ? 'Processed' : 'Ready'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
               {showFileDetails && (
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-64 overflow-y-auto">
                   {selectedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-600">
-                      <div className="flex items-center space-x-3">
+                    <div key={index} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-600 hover:bg-gray-800/70 transition-colors">
+                      <div className="flex items-center space-x-3 flex-1 min-w-0">
                         {getFileIcon(file.name)}
-                        <span className="font-medium text-white">{file.name}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-white block truncate">{file.name}</span>
+                          {isProcessingFolder && file.webkitRelativePath && (
+                            <span className="text-xs text-gray-400 block truncate">
+                              {file.webkitRelativePath}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-sm text-gray-400">{formatFileSize(file.size)}</span>
+                      <div className="flex items-center space-x-3 text-sm text-gray-400">
+                        <span>{formatFileSize(file.size)}</span>
+                        {processingStep === 'complete' && (
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           </section>
+        )}
+
+        {/* Feature Status Footer (Development Only) */}
+        {ENVIRONMENT === 'development' && (
+          <footer className="text-center py-8 border-t border-gray-700 mt-16">
+            <div className="space-y-2">
+              <h4 className="text-lg font-semibold text-white">Development Feature Status</h4>
+              <div className="flex flex-wrap justify-center gap-4 text-sm">
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${isBatchEnabled() ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                  <span className="text-gray-300">Batch Processing</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${isFolderDropEnabled() ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                  <span className="text-gray-300">Folder Drop</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full bg-green-400"></div>
+                  <span className="text-gray-300">Single File Processing</span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 max-w-md mx-auto">
+                Feature flags control which capabilities are enabled. 
+                Folder support requires modern browser with FileSystemEntry API.
+              </p>
+            </div>
+          </footer>
         )}
       </div>
     </div>
