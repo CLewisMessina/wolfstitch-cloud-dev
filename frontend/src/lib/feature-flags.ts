@@ -1,6 +1,7 @@
 // frontend/src/lib/feature-flags.ts
 /**
  * Feature Flag System
+ * Fix 2
  * Production-safe feature toggles with environment-based configuration
  */
 
