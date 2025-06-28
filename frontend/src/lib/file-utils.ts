@@ -1,302 +1,310 @@
 // frontend/src/lib/file-utils.ts
 /**
- * File Processing Utilities
- * Handles file validation, folder traversal, and processing
- * Fix 2:06
+ * File utilities for folder traversal and batch processing
+ * Handles recursive directory reading and file filtering
  */
 
-// Supported file extensions (40+ formats)
-export const SUPPORTED_EXTENSIONS = [
-  // Documents
-  'pdf', 'docx', 'doc', 'txt', 'epub', 'html', 'htm', 'md', 'markdown', 'rtf',
-  
-  // Spreadsheets and data
-  'xlsx', 'csv', 'json', 'yaml', 'yml', 'xml', 'toml', 'ini',
-  
-  // Presentations
-  'pptx',
-  
-  // Code files
-  'py', 'js', 'jsx', 'ts', 'tsx', 'java', 'cpp', 'cc', 'cxx', 'c', 'h', 'hpp',
-  'go', 'rs', 'rb', 'php', 'swift', 'kt', 'cs', 'r', 'scala', 'sh', 'bash', 'zsh', 'fish'
-];
+import { isDebugMode } from './feature-flags';
 
-// File size limits
-const MAX_FILE_SIZE_MB = 100;
-const MAX_BATCH_SIZE_MB = 500;
-const MAX_BATCH_FILES = 100;
-const MAX_FOLDER_DEPTH = 10;
+// Supported file extensions (matching backend configuration)
+export const SUPPORTED_EXTENSIONS = [
+  '.pdf', '.docx', '.txt', '.md', '.py', '.js', '.json', '.csv', 
+  '.pptx', '.xlsx', '.html', '.htm', '.xml', '.rtf', '.odt', 
+  '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.lit', '.prc'
+];
 
 // File validation result interface
 export interface FileValidationResult {
   isValid: boolean;
-  error?: string;
+  reason?: string;
+  size?: number;
+  type?: string;
+}
+
+// File tree traversal result
+export interface TraversalResult {
+  files: File[];
+  totalFiles: number;
+  skippedFiles: number;
+  errors: string[];
+  totalSize: number;
 }
 
 /**
- * Validate a single file
+ * Validate a single file for processing
  */
 export const validateFile = (file: File): FileValidationResult => {
   // Check file extension
-  const extension = getFileExtension(file.name);
-  if (!extension || !SUPPORTED_EXTENSIONS.includes(extension)) {
+  const extension = `.${file.name.split('.').pop()?.toLowerCase()}`;
+  if (!SUPPORTED_EXTENSIONS.includes(extension)) {
     return {
       isValid: false,
-      error: `Unsupported file type: .${extension || 'unknown'}`
+      reason: `Unsupported file type: ${extension}`,
+      size: file.size,
+      type: file.type
     };
   }
-  
-  // Check file size
-  const sizeMB = file.size / (1024 * 1024);
-  if (sizeMB > MAX_FILE_SIZE_MB) {
+
+  // Check file size (100MB limit)
+  const maxSize = 100 * 1024 * 1024; // 100MB
+  if (file.size > maxSize) {
     return {
       isValid: false,
-      error: `File too large: ${sizeMB.toFixed(1)}MB (max: ${MAX_FILE_SIZE_MB}MB)`
+      reason: `File too large: ${formatFileSize(file.size)} (max: 100MB)`,
+      size: file.size,
+      type: file.type
     };
   }
-  
-  // Check for empty files
-  if (file.size === 0) {
+
+  // Check for hidden files (skip .DS_Store, .thumbs.db, etc.)
+  if (file.name.startsWith('.') || file.name.toLowerCase().includes('thumbs.db')) {
     return {
       isValid: false,
-      error: 'File is empty'
+      reason: 'Hidden or system file',
+      size: file.size,
+      type: file.type
     };
   }
-  
-  return { isValid: true };
+
+  return {
+    isValid: true,
+    size: file.size,
+    type: file.type
+  };
 };
 
 /**
- * Get file extension (lowercase)
- */
-export const getFileExtension = (filename: string): string | null => {
-  const lastDot = filename.lastIndexOf('.');
-  if (lastDot === -1 || lastDot === filename.length - 1) {
-    return null;
-  }
-  return filename.slice(lastDot + 1).toLowerCase();
-};
-
-/**
- * Format file size for display
+ * Format file size for human readability
  */
 export const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
-  
+  if (bytes === 0) return '0 Bytes';
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
 /**
- * Process FileList into File array with validation
+ * Traverse file tree from DataTransferItems (for drag/drop)
  */
-export const processFileList = async (fileList: FileList): Promise<File[]> => {
-  const files: File[] = [];
-  
-  for (let i = 0; i < fileList.length; i++) {
-    const file = fileList[i];
-    
-    // Skip hidden files and system files
-    if (isHiddenFile(file.name)) {
-      continue;
-    }
-    
-    files.push(file);
-  }
-  
-  return files;
-};
+export const traverseFileTree = async (items: DataTransferItemList): Promise<TraversalResult> => {
+  const result: TraversalResult = {
+    files: [],
+    totalFiles: 0,
+    skippedFiles: 0,
+    errors: [],
+    totalSize: 0
+  };
 
-/**
- * Check if file should be hidden/skipped
- */
-const isHiddenFile = (filename: string): boolean => {
-  const hiddenPrefixes = ['.DS_Store', '.', '__MACOSX', 'Thumbs.db', 'desktop.ini'];
-  return hiddenPrefixes.some(prefix => filename.startsWith(prefix));
-};
-
-/**
- * Recursive folder traversal using FileSystemEntry API
- * Returns all files found in the directory tree
- */
-export const traverseFileTree = async (entry: FileSystemEntry, depth = 0): Promise<File[]> => {
-  // Prevent infinite recursion
-  if (depth > MAX_FOLDER_DEPTH) {
-    console.warn(`Maximum folder depth (${MAX_FOLDER_DEPTH}) exceeded`);
-    return [];
-  }
-  
-  return new Promise((resolve, reject) => {
+  const processEntry = async (entry: FileSystemEntry): Promise<void> => {
     if (entry.isFile) {
-      // Handle file entry
       const fileEntry = entry as FileSystemFileEntry;
-      fileEntry.file(
-        (file) => {
-          // Skip hidden files
-          if (isHiddenFile(file.name)) {
-            resolve([]);
-          } else {
-            resolve([file]);
+      
+      try {
+        const file = await new Promise<File>((resolve, reject) => {
+          fileEntry.file(resolve, reject);
+        });
+
+        result.totalFiles++;
+        
+        const validation = validateFile(file);
+        if (validation.isValid) {
+          result.files.push(file);
+          result.totalSize += file.size;
+          
+          if (isDebugMode()) {
+            console.log(`✅ Added file: ${file.name} (${formatFileSize(file.size)})`);
           }
-        },
-        (error) => {
-          console.warn(`Error reading file ${entry.name}:`, error);
-          resolve([]); // Continue processing other files
+        } else {
+          result.skippedFiles++;
+          
+          if (isDebugMode()) {
+            console.log(`⏭️ Skipped file: ${file.name} - ${validation.reason}`);
+          }
         }
-      );
+      } catch (error) {
+        result.errors.push(`Failed to read file: ${entry.name}`);
+        
+        if (isDebugMode()) {
+          console.error(`❌ Error reading file ${entry.name}:`, error);
+        }
+      }
     } else if (entry.isDirectory) {
-      // Handle directory entry
-      const directoryEntry = entry as FileSystemDirectoryEntry;
-      const reader = directoryEntry.createReader();
+      const dirEntry = entry as FileSystemDirectoryEntry;
       
-      const allFiles: File[] = [];
-      
-      const readEntries = () => {
-        reader.readEntries(
-          async (entries) => {
-            if (entries.length === 0) {
-              // No more entries, resolve with accumulated files
-              resolve(allFiles);
-              return;
-            }
-            
-            try {
-              // Process all entries in this batch
-              const promises = entries.map(childEntry => 
-                traverseFileTree(childEntry, depth + 1)
-              );
-              
-              const results = await Promise.all(promises);
-              
-              // Flatten and add to accumulated files
-              for (const fileList of results) {
-                allFiles.push(...fileList);
-              }
-              
-              // Read next batch
-              readEntries();
-            } catch (error) {
-              console.warn(`Error processing directory ${entry.name}:`, error);
-              resolve(allFiles); // Return what we have so far
-            }
-          },
-          (error) => {
-            console.warn(`Error reading directory ${entry.name}:`, error);
-            resolve(allFiles); // Return what we have so far
-          }
-        );
-      };
-      
-      readEntries();
-    } else {
-      // Unknown entry type
-      resolve([]);
+      try {
+        const entries = await readDirectory(dirEntry);
+        
+        // Process all entries in this directory
+        for (const childEntry of entries) {
+          await processEntry(childEntry);
+        }
+      } catch (error) {
+        result.errors.push(`Failed to read directory: ${entry.name}`);
+        
+        if (isDebugMode()) {
+          console.error(`❌ Error reading directory ${entry.name}:`, error);
+        }
+      }
     }
-  });
-};
+  };
 
-/**
- * Validate batch of files
- */
-export const validateBatch = (files: File[]): { valid: File[]; invalid: File[]; errors: string[] } => {
-  const valid: File[] = [];
-  const invalid: File[] = [];
-  const errors: string[] = [];
-  
-  // Check batch size
-  if (files.length > MAX_BATCH_FILES) {
-    errors.push(`Too many files: ${files.length} (max: ${MAX_BATCH_FILES})`);
-    return { valid, invalid, errors };
-  }
-  
-  // Check total batch size
-  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-  const totalSizeMB = totalSize / (1024 * 1024);
-  
-  if (totalSizeMB > MAX_BATCH_SIZE_MB) {
-    errors.push(`Batch too large: ${totalSizeMB.toFixed(1)}MB (max: ${MAX_BATCH_SIZE_MB}MB)`);
-    return { valid, invalid, errors };
-  }
-  
-  // Validate individual files
-  for (const file of files) {
-    const validation = validateFile(file);
-    if (validation.isValid) {
-      valid.push(file);
-    } else {
-      invalid.push(file);
-      errors.push(`${file.name}: ${validation.error}`);
-    }
-  }
-  
-  return { valid, invalid, errors };
-};
-
-/**
- * Extract files from dropped items (handles both files and folders)
- */
-export const extractFilesFromDropItems = async (items: DataTransferItemList): Promise<File[]> => {
-  const allFiles: File[] = [];
-  
+  // Process all dropped items
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     
     if (item.kind === 'file') {
       const entry = item.webkitGetAsEntry?.();
+      
       if (entry) {
-        const files = await traverseFileTree(entry);
-        allFiles.push(...files);
+        await processEntry(entry);
       } else {
         // Fallback for browsers without webkitGetAsEntry
         const file = item.getAsFile();
-        if (file && !isHiddenFile(file.name)) {
-          allFiles.push(file);
+        if (file) {
+          result.totalFiles++;
+          
+          const validation = validateFile(file);
+          if (validation.isValid) {
+            result.files.push(file);
+            result.totalSize += file.size;
+          } else {
+            result.skippedFiles++;
+          }
         }
       }
     }
   }
-  
-  return allFiles;
-};
 
-/**
- * Check if browser supports the FileSystemEntry API
- */
-export const supportsFileSystemAccess = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  
-  try {
-    const dt = new DataTransfer();
-    const item = dt.items[0];
-    return item && typeof item.webkitGetAsEntry === 'function';
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Debug utility to log file processing information
- */
-export const debugFileInfo = (files: File[], context = 'File processing'): void => {
-  if (process.env.NODE_ENV === 'development') {
-    console.group(`[File Utils] ${context}`);
-    console.log(`Total files: ${files.length}`);
-    console.log(`Total size: ${formatFileSize(files.reduce((sum, f) => sum + f.size, 0))}`);
-    
-    const extensions = files.map(f => getFileExtension(f.name)).filter(Boolean);
-    const uniqueExtensions = [...new Set(extensions)];
-    console.log(`File types: ${uniqueExtensions.join(', ')}`);
-    
-    if (files.length <= 10) {
-      console.table(files.map(f => ({
-        name: f.name,
-        size: formatFileSize(f.size),
-        type: getFileExtension(f.name)
-      })));
-    }
+  if (isDebugMode()) {
+    console.group('📁 Folder Traversal Complete');
+    console.log(`Total files found: ${result.totalFiles}`);
+    console.log(`Valid files: ${result.files.length}`);
+    console.log(`Skipped files: ${result.skippedFiles}`);
+    console.log(`Total size: ${formatFileSize(result.totalSize)}`);
+    console.log(`Errors: ${result.errors.length}`);
     console.groupEnd();
   }
+
+  return result;
 };
+
+/**
+ * Read directory entries using FileSystemDirectoryReader - FIXED: Removed unused reject parameter
+ */
+const readDirectory = async (dirEntry: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> => {
+  return new Promise((resolve) => {
+    const reader = dirEntry.createReader();
+    const entries: FileSystemEntry[] = [];
+
+    const readEntries = () => {
+      reader.readEntries((batch) => {
+        if (batch.length === 0) {
+          // No more entries
+          resolve(entries);
+        } else {
+          // Add this batch and continue reading
+          entries.push(...batch);
+          readEntries();
+        }
+      }, (error) => {
+        // Handle errors gracefully instead of rejecting
+        console.warn('Error reading directory entries:', error);
+        resolve(entries); // Return what we have so far
+      });
+    };
+
+    readEntries();
+  });
+};
+
+/**
+ * Process FileList from input[webkitdirectory] or input[multiple]
+ */
+export const processFileList = (fileList: FileList): TraversalResult => {
+  const result: TraversalResult = {
+    files: [],
+    totalFiles: fileList.length,
+    skippedFiles: 0,
+    errors: [],
+    totalSize: 0
+  };
+
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    
+    const validation = validateFile(file);
+    if (validation.isValid) {
+      result.files.push(file);
+      result.totalSize += file.size;
+    } else {
+      result.skippedFiles++;
+      
+      if (isDebugMode()) {
+        console.log(`⏭️ Skipped file: ${file.name} - ${validation.reason}`);
+      }
+    }
+  }
+
+  if (isDebugMode()) {
+    console.group('📄 File List Processing Complete');
+    console.log(`Total files: ${result.totalFiles}`);
+    console.log(`Valid files: ${result.files.length}`);
+    console.log(`Skipped files: ${result.skippedFiles}`);
+    console.log(`Total size: ${formatFileSize(result.totalSize)}`);
+    console.groupEnd();
+  }
+
+  return result;
+};
+
+/**
+ * Get file icon based on extension
+ */
+export const getFileIcon = (fileName: string): string => {
+  const extension = fileName.split('.').pop()?.toLowerCase();
+  
+  switch (extension) {
+    case 'pdf':
+      return '📄';
+    case 'docx':
+    case 'doc':
+      return '📝';
+    case 'txt':
+    case 'md':
+      return '📋';
+    case 'py':
+    case 'js':
+    case 'json':
+      return '💻';
+    case 'csv':
+    case 'xlsx':
+    case 'xls':
+      return '📊';
+    case 'pptx':
+    case 'ppt':
+      return '📊';
+    case 'html':
+    case 'htm':
+      return '🌐';
+    case 'xml':
+      return '📋';
+    case 'epub':
+    case 'mobi':
+      return '📚';
+    default:
+      return '📄';
+  }
+};
+
+// Export utilities object - FIXED: Named variable instead of anonymous object
+const fileUtils = {
+  validateFile,
+  formatFileSize,
+  traverseFileTree,
+  processFileList,
+  getFileIcon,
+  SUPPORTED_EXTENSIONS
+};
+
+export default fileUtils;

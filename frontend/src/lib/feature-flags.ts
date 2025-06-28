@@ -1,105 +1,119 @@
 // frontend/src/lib/feature-flags.ts
 /**
- * Feature Flag System
- * Fix 2
- * Production-safe feature toggles with environment-based configuration
+ * Feature flag utilities for progressive feature rollout
+ * Centralizes all feature flag logic for the application
  */
 
-// Environment variables (with safe defaults)
-const ENABLE_BATCH = process.env.NEXT_PUBLIC_ENABLE_BATCH === 'true';
-const ENABLE_FOLDER_DROP = process.env.NEXT_PUBLIC_ENABLE_FOLDER_DROP === 'true';
-const DEBUG_MODE = process.env.NEXT_PUBLIC_DEBUG_MODE === 'true';
-const ENVIRONMENT = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
+// Feature flag configuration interface
+export interface FeatureFlags {
+  batchProcessing: boolean;
+  folderDrop: boolean;
+  maxBatchSize: number;
+  maxBatchSizeMB: number;
+  debugMode: boolean;
+}
 
-/**
- * Check if batch processing is enabled
- * Requires both environment flag and browser capability
- */
-export const isBatchEnabled = (): boolean => {
-  // Production safety: require explicit enabling
-  if (ENVIRONMENT === 'production' && !ENABLE_BATCH) {
-    return false;
-  }
-  
-  return ENABLE_BATCH;
-};
-
-/**
- * Check if folder drop functionality is enabled
- * Requires both environment flag and browser FileSystemEntry API support
- */
-export const isFolderDropEnabled = (): boolean => {
-  // Production safety: require explicit enabling
-  if (ENVIRONMENT === 'production' && !ENABLE_FOLDER_DROP) {
-    return false;
-  }
-  
-  // Check browser capability
-  if (!hasFolderDropSupport()) {
-    return false;
-  }
-  
-  return ENABLE_FOLDER_DROP;
-};
-
-/**
- * Check if browser supports folder drop (FileSystemEntry API)
- */
-export const hasFolderDropSupport = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  
-  // Check for DataTransferItem.webkitGetAsEntry support
-  try {
-    const dt = new DataTransfer();
-    const item = dt.items[0];
-    return item && typeof item.webkitGetAsEntry === 'function';
-  } catch {
-    // If DataTransfer is not available, check for webkitdirectory
-    const input = document.createElement('input');
-    return 'webkitdirectory' in input;
-  }
-};
-
-/**
- * Check if browser supports webkitdirectory attribute
- */
-export const hasWebkitDirectorySupport = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  
-  const input = document.createElement('input');
-  return 'webkitdirectory' in input;
-};
-
-/**
- * Debug logging (only in development)
- */
-export const debugLog = (message: string, ...args: any[]): void => {
-  if (DEBUG_MODE || ENVIRONMENT === 'development') {
-    console.log(`[Feature Flags] ${message}`, ...args);
-  }
-};
-
-/**
- * Get feature status for debugging
- */
-export const getFeatureStatus = () => {
+// Get all feature flags from environment
+export const getFeatureFlags = (): FeatureFlags => {
   return {
-    batch: isBatchEnabled(),
-    folderDrop: isFolderDropEnabled(),
-    browserSupport: {
-      webkitDirectory: hasWebkitDirectorySupport(),
-      fileSystemEntry: hasFolderDropSupport(),
-    },
-    environment: ENVIRONMENT,
-    flags: {
-      ENABLE_BATCH,
-      ENABLE_FOLDER_DROP,
-      DEBUG_MODE,
-    },
+    batchProcessing: process.env.NEXT_PUBLIC_ENABLE_BATCH === 'true',
+    folderDrop: process.env.NEXT_PUBLIC_ENABLE_FOLDER_DROP === 'true',
+    maxBatchSize: parseInt(process.env.NEXT_PUBLIC_MAX_BATCH_SIZE || '100', 10),
+    maxBatchSizeMB: parseInt(process.env.NEXT_PUBLIC_MAX_BATCH_SIZE_MB || '500', 10),
+    debugMode: process.env.NEXT_PUBLIC_DEBUG_MODE === 'true'
   };
 };
 
-// Development logging
-if (typeof window !== 'undefined' && (DEBUG_MODE || ENVIRONMENT === 'development')) {
-  debugLog('Feature flags initialized:', getFeatureStatus());
+// Individual feature flag getters for convenience
+// Default to false for production safety
+export const isBatchEnabled = (): boolean => {
+  // Only enable if explicitly set to true AND not in production with flag disabled
+  const enabled = process.env.NEXT_PUBLIC_ENABLE_BATCH === 'true';
+  const isProd = process.env.NEXT_PUBLIC_ENVIRONMENT === 'production';
+  
+  if (isProd && !enabled) {
+    return false; // Production safety: require explicit enabling
+  }
+  
+  return enabled;
+};
+
+export const isFolderDropEnabled = (): boolean => {
+  // Only enable if explicitly set to true AND not in production with flag disabled  
+  const enabled = process.env.NEXT_PUBLIC_ENABLE_FOLDER_DROP === 'true';
+  const isProd = process.env.NEXT_PUBLIC_ENVIRONMENT === 'production';
+  
+  if (isProd && !enabled) {
+    return false; // Production safety: require explicit enabling
+  }
+  
+  return enabled;
+};
+
+export const isDebugMode = (): boolean => {
+  return process.env.NEXT_PUBLIC_DEBUG_MODE === 'true';
+};
+
+export const getMaxBatchSize = (): number => {
+  return parseInt(process.env.NEXT_PUBLIC_MAX_BATCH_SIZE || '100', 10);
+};
+
+export const getMaxBatchSizeMB = (): number => {
+  return parseInt(process.env.NEXT_PUBLIC_MAX_BATCH_SIZE_MB || '500', 10);
+};
+
+// Runtime feature detection
+export const checkBrowserSupport = () => {
+  const support = {
+    webkitdirectory: 'webkitdirectory' in document.createElement('input'),
+    fileSystemAccess: 'showDirectoryPicker' in window,
+    dragDropFolders: true, // Most modern browsers support this
+    asyncIterators: typeof Symbol?.asyncIterator !== 'undefined'
+  };
+
+  return support;
+};
+
+// Feature flag debugging helper - FIXED: Added explicit return type
+export const logFeatureFlags = (): void => {
+  if (!isDebugMode()) return;
+
+  const flags = getFeatureFlags();
+  const support = checkBrowserSupport();
+
+  console.group('🏗️ Wolfstitch Feature Flags');
+  console.table(flags);
+  console.group('🌐 Browser Support');
+  console.table(support);
+  console.groupEnd();
+  console.groupEnd();
+};
+
+// Initialize window global for debugging - FIXED: Added type assertion
+if (typeof window !== 'undefined' && isDebugMode()) {
+  (window as typeof window & {
+    __WOLFSTITCH_DEBUG__?: {
+      logFileTraversal: boolean;
+      logBatchProgress: boolean;
+      simulateSlowNetwork: boolean;
+    };
+  }).__WOLFSTITCH_DEBUG__ = {
+    logFileTraversal: true,
+    logBatchProgress: true,
+    simulateSlowNetwork: false
+  };
 }
+
+// Export utilities object - FIXED: Named variable instead of anonymous object
+const featureFlagUtils = {
+  getFeatureFlags,
+  isBatchEnabled,
+  isFolderDropEnabled,
+  isDebugMode,
+  getMaxBatchSize,
+  getMaxBatchSizeMB,
+  checkBrowserSupport,
+  logFeatureFlags
+};
+
+export default featureFlagUtils;
