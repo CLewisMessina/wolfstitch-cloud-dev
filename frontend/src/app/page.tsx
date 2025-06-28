@@ -5,25 +5,21 @@ import React, { useState, useRef } from 'react';
 import { 
   Upload, 
   File, 
-  Folder, 
   Code, 
   FileText, 
   Download, 
   CheckCircle, 
-  Eye,
   ChevronDown,
   Zap,
-  Activity,
   AlertCircle,
   FolderOpen
 } from 'lucide-react';
 
 // Import feature flags and file utilities - FIXED to match actual implementations
-import { isBatchEnabled, isFolderDropEnabled, isDebugMode } from '@/lib/feature-flags';
+import { isBatchEnabled, isFolderDropEnabled } from '@/lib/feature-flags';
 import { 
   traverseFileTree, 
   processFileList, 
-  validateFile, 
   formatFileSize,
   SUPPORTED_EXTENSIONS,
   type TraversalResult 
